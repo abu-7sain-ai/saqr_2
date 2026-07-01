@@ -9,7 +9,7 @@ yfinance==0.2.40
 python-telegram-bot==20.6
 apscheduler==3.10.4
 requests==2.31.0
-alpaca-trade-api==3.2.0
+alpaca-py==0.38.0
 google-generativeai
 ccxt==4.3.98
 numpy==1.26.4
