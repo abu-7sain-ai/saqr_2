@@ -80,6 +80,10 @@ class CloneWorkerRequest(BaseModel):
 async def health_check():
     return {"status": "ok", "version": "0.2.0"}
 
+@app.get("/", tags=["Health"])
+async def root_check():
+    return {"status": "running", "message": "Saqr Backend API is active", "version": "0.2.0"}
+
 @app.get("/health/db", tags=["Health"])
 async def db_health_check():
     try:
