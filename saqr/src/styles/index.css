@@ -1,0 +1,455 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+:root {
+  /* FutureSwap Redesign - Global Design Tokens */
+  --bg-base: #0B0E14;
+  --bg-surface: rgba(22, 27, 34, 0.7);
+  
+  --accent-primary: #00FF9D;
+  --accent-secondary: #00E5FF;
+  --accent-tertiary: #7B61FF;
+  
+  --text-primary: #FFFFFF;
+  --text-secondary: #8B949E;
+  
+  --border-subtle: rgba(255, 255, 255, 0.1);
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --blur-glass: 12px;
+  --shadow-glow-primary: 0 0 15px rgba(0, 255, 157, 0.4);
+  --shadow-glow-secondary: 0 0 20px rgba(0, 229, 255, 0.3);
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Legacy Saqr variables (Mapping to new tokens for compatibility) */
+  --saqr-gold: var(--accent-primary);
+  --saqr-gold-bright: var(--accent-secondary);
+  --saqr-gold-muted: var(--text-secondary);
+  --saqr-gold-vibrant: var(--accent-primary);
+  --saqr-gold-glow: rgba(0, 255, 157, 0.45);
+  --saqr-black: var(--bg-base);
+  --saqr-charcoal: #0a0a0f;
+  --saqr-surface: var(--bg-surface);
+  --saqr-emerald: var(--accent-primary);
+  --saqr-ruby: #ff0055;
+  --saqr-silver: var(--text-primary);
+  --glass-border: var(--border-subtle);
+  --saqr-shadow: var(--shadow-glow-primary);
+  --font-header: 'Outfit', sans-serif;
+  --font-body: var(--font-sans);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-base) !important;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  background-image:
+    radial-gradient(circle at 0% 0%, rgba(0, 255, 157, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 100% 100%, rgba(0, 229, 255, 0.05) 0%, transparent 50%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* Premium Navigation Fixes */
+.navbar,
+.card {
+  background: transparent !important;
+  border: none !important;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.saqr-title {
+  font-family: var(--font-header);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: white;
+  margin-bottom: 1rem;
+}
+
+h1 {
+  font-size: 2.75rem;
+  line-height: 1.1;
+}
+h2 {
+  font-size: 2.25rem;
+  line-height: 1.2;
+}
+h3 {
+  font-size: 1.75rem;
+  line-height: 1.3;
+}
+h4 {
+  font-size: 1.5rem;
+  line-height: 1.4;
+}
+h5 {
+  font-size: 1.25rem;
+  line-height: 1.4;
+}
+h6 {
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* Utility Typography */
+.small {
+  font-size: 0.875rem !important;
+}
+.extra-small,
+.x-small {
+  font-size: 0.75rem !important;
+}
+.fw-black {
+  font-weight: 900 !important;
+}
+.tracking-widest {
+  letter-spacing: 0.1em;
+}
+
+/* Normalize Bootstrap Utility Sizes */
+.fs-1 {
+  font-size: 2.75rem !important;
+}
+.fs-2 {
+  font-size: 2.25rem !important;
+}
+.fs-3 {
+  font-size: 1.75rem !important;
+}
+.fs-4 {
+  font-size: 1.5rem !important;
+}
+.fs-5 {
+  font-size: 1.25rem !important;
+}
+.fs-6 {
+  font-size: 1rem !important;
+}
+
+/* Glassmorphism Redesign - FutureSwap Style */
+.glass-panel {
+  background: var(--bg-surface);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  border: 1px solid var(--border-subtle);
+  border-radius: 24px;
+  box-shadow: var(--shadow-glow-secondary);
+  z-index: 10;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(var(--blur-glass));
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  transition: var(--transition-smooth);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(to right, transparent, rgba(0, 255, 157, 0.05), transparent);
+  transform: skewX(-30deg);
+  transition: 0.8s;
+}
+
+.glass-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent-primary);
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-glow-primary);
+}
+
+/* Vibrant Gold Glow Text */
+.text-gold {
+  background: linear-gradient(135deg, #ffffff 0%, #fff200 40%, #ffd700 70%, #d4af37 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 15px rgba(255, 215, 0, 0.5));
+  font-weight: 900;
+}
+
+/* Premium Buttons - FutureSwap Style */
+.btn-accent, .btn-gold {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%) !important;
+  color: #000 !important;
+  border: none !important;
+  font-weight: 800 !important;
+  border-radius: 12px !important;
+  padding: 12px 28px !important;
+  transition: var(--transition-smooth) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  box-shadow: var(--shadow-glow-primary) !important;
+}
+
+.btn-accent:hover, .btn-gold:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+  box-shadow: 0 0 25px rgba(0, 255, 157, 0.6) !important;
+}
+
+.btn-accent:active, .btn-gold:active {
+  transform: translateY(0);
+}
+
+.btn-outline-accent, .btn-outline-gold {
+  background: rgba(255, 255, 255, 0.02) !important;
+  color: var(--accent-primary) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  transition: var(--transition-smooth) !important;
+  backdrop-filter: blur(8px);
+}
+
+.btn-outline-accent:hover, .btn-outline-gold:hover {
+  background: rgba(0, 255, 157, 0.05) !important;
+  border-color: var(--accent-primary) !important;
+  box-shadow: var(--shadow-glow-primary) !important;
+  transform: translateY(-2px);
+}
+
+/* Fix Modal z-index and Glassmorphism */
+.modal-backdrop {
+  z-index: 2000 !important;
+  background-color: rgba(5, 5, 8, 0.8) !important;
+  backdrop-filter: blur(4px);
+}
+.modal {
+  z-index: 2001 !important;
+}
+.modal-content {
+  background: var(--bg-surface) !important;
+  backdrop-filter: blur(var(--blur-glass)) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 24px !important;
+  box-shadow: var(--shadow-glow-secondary) !important;
+}
+.modal-header, .modal-footer {
+  border-color: var(--border-subtle) !important;
+}
+
+/* Premium Inputs - FutureSwap Style */
+.form-control,
+.form-select {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  transition: var(--transition-smooth) !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 4px rgba(0, 255, 157, 0.1) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Custom Premium Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #020203;
+}
+::-webkit-scrollbar-thumb {
+  background: #1a1a1e;
+  border-radius: 12px;
+  border: 3px solid #020203;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--saqr-gold);
+}
+
+/* Layout System */
+.layout-wrapper {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.content-area {
+  flex: 1;
+  padding: 3rem;
+  margin-left: 260px; /* Sidebar width */
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  background: radial-gradient(circle at 10% 10%, rgba(212, 175, 55, 0.03) 0%, transparent 50%);
+  min-width: 0;
+}
+
+/* Premium Table Styles - FutureSwap Style */
+.table {
+  color: var(--text-primary) !important;
+}
+
+.table thead th {
+  border-bottom: 2px solid var(--border-subtle) !important;
+  color: var(--accent-primary) !important;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  padding: 1rem !important;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.table tbody td {
+  border-bottom: 1px solid var(--border-subtle) !important;
+  padding: 1rem !important;
+  background: transparent !important;
+}
+
+.table tr:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.hover-row:hover {
+  background: rgba(255, 215, 0, 0.02) !important;
+}
+
+/* Animations */
+.animate-fade-in {
+  animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Status Badges */
+.badge-premium {
+  padding: 6px 14px !important;
+  border-radius: 100px !important;
+  font-weight: 700 !important;
+  font-size: 0.7rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid currentColor !important;
+}
+
+/* Utility Colors */
+.text-emerald, .text-accent-primary {
+  color: var(--accent-primary);
+  text-shadow: 0 0 12px rgba(0, 255, 157, 0.4);
+}
+.text-accent-secondary {
+  color: var(--accent-secondary);
+  text-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
+}
+.text-ruby {
+  color: var(--saqr-ruby);
+  text-shadow: 0 0 12px rgba(255, 45, 85, 0.4);
+}
+.text-silver {
+  color: var(--text-primary);
+}
+
+.shadow-accent {
+  box-shadow: var(--shadow-glow-primary);
+}
+
+.bg-accent-primary {
+  background-color: var(--accent-primary) !important;
+}
+
+.bg-emerald {
+  background-color: var(--accent-primary) !important;
+}
+
+/* Global Advisor FAB - FutureSwap Style */
+.advisor-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2000;
+  width: 56px;
+  height: 56px;
+  background: var(--accent-primary);
+  color: #000;
+  border: none;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  box-shadow: var(--shadow-glow-primary);
+}
+
+.advisor-fab:hover {
+  transform: translateY(-5px) scale(1.05);
+  filter: brightness(1.1);
+  box-shadow: 0 0 30px rgba(0, 255, 157, 0.6);
+}
+
+.advisor-fab .icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.advisor-fab .sparkle {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  color: #fff;
+  animation: rotate-sparkle 3s linear infinite;
+}
+
+@keyframes rotate-sparkle {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.advisor-fab.pulse {
+  animation: fab-pulse 2s infinite;
+}
+
+@keyframes fab-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 255, 157, 0.4); }
+  70% { box-shadow: 0 0 0 20px rgba(0, 255, 157, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 255, 157, 0); }
+}
+
+@media (max-width: 768px) {
+  .advisor-fab {
+    bottom: 20px;
+    right: 20px;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+  }
+}
+
