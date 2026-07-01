@@ -6,7 +6,10 @@ import logging
 import os
 import asyncio
 import uuid
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Request
@@ -395,6 +398,8 @@ async def get_performance_analytics(user_id: str):
 # --- Background Tasks ---
 async def scheduled_health_check():
     try:
+        if psutil is None:
+            return
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
         if cpu > 80: await Notifier.send_telegram(f"⚠️ CPU High: {cpu}%")
