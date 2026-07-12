@@ -21,6 +21,12 @@ class BinanceMarket(BaseMarket):
         if self.is_paper:
             self.client.set_sandbox_mode(True)
 
+        # Public Client for public endpoints
+        self.public_client = ccxt.binance({
+            'enableRateLimit': True,
+            'options': {'defaultType': 'spot'}
+        })
+
     async def close(self):
         await self.client.close()
         await self.public_client.close()
