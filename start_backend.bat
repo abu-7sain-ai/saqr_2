@@ -14,7 +14,7 @@ if exist "..\.venv\Scripts\uvicorn.exe" (
 ) else if exist ".venv\Scripts\uvicorn.exe" (
     .venv\Scripts\uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ) else (
-    echo [ERROR] Virtual environment (.venv) not found!
+    echo [ERROR] Virtual environment .venv not found!
     echo Please create virtual env in root or backend folder and run:
     echo python -m venv .venv
 )

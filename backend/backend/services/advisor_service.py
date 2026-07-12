@@ -56,7 +56,7 @@ class AdvisorService:
 
     @classmethod
     async def generate_advice(cls, user_text, system_snapshot, user_id=None):
-        """Generates real-time advice using Groq (llama-3.3-70b-versatile)."""
+        """Generates real-time advice using Groq (llama-3.3-70b-versatile) with fallback to Gemini/OpenRouter."""
         request_id = str(uuid.uuid4())[:8]
         start = time.monotonic()
 
@@ -64,7 +64,7 @@ class AdvisorService:
         if any(kw in user_text.lower() for kw in ["ignore previous", "reset rules", "act as"]):
             return "عذراً، لا أقدر أتجاوز قواعد النظام 🦅", None
 
-        # Build messages في صيغة OpenAI (اللي Groq بيدعمها)
+        # Build messages
         system_msg = cls.SYSTEM_PROMPT.format(system_snapshot=system_snapshot)
         messages = [
             {"role": "system", "content": system_msg},
@@ -73,64 +73,114 @@ class AdvisorService:
 
         logger.info(f"[{request_id}] Advisor call started (Primary: Groq / {GROQ_MODEL})")
 
-        try:
-            client = get_groq_client()
+        content = None
+        usage = None
+        provider = "groq"
 
-            # ✅ Groq call — نفس صيغة OpenAI تماماً
+        try:
+            # 1. Try Groq (Primary)
+            client = get_groq_client()
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     client.chat.completions.create,
                     model=GROQ_MODEL,
                     messages=messages,
                     max_tokens=400,
-                    temperature=0.4,   # حذر ومتوازن — ارفعه لو عايز إجابات أكثر إبداعاً
+                    temperature=0.4,
                 ),
                 timeout=ADVISOR_TIMEOUT_SECONDS
             )
-
-            elapsed = (time.monotonic() - start) * 1000  # ms
             content = response.choices[0].message.content
-
-            # FR-011-14: Response Length Limit
-            if len(content) > 3500:
-                content = content[:3500] + "\n\n... للمزيد من التفاصيل، أرسل سؤال محدد 🦅"
-
-            # Usage tracking (FR-011-07)
             usage = {
                 "prompt_tokens":     response.usage.prompt_tokens     if response.usage else 0,
                 "completion_tokens": response.usage.completion_tokens if response.usage else 0,
                 "total_tokens":      response.usage.total_tokens      if response.usage else 0,
             }
+            logger.info(f"[{request_id}] Groq succeeded in {(time.monotonic()-start):.2f}s | tokens={usage['total_tokens']}")
+        except Exception as groq_err:
+            logger.warning(f"[{request_id}] Groq failed: {groq_err}. Trying direct Gemini fallback...")
+            provider = "gemini"
+            try:
+                # 2. Try Gemini (Secondary)
+                from backend.config import get_gemini_client
+                model = get_gemini_client()
+                
+                # Combine system instructions and user message for Gemini
+                combined_prompt = f"{system_msg}\n\nUser Message:\n{user_text}"
+                response_gemini = await asyncio.wait_for(
+                    asyncio.to_thread(model.generate_content, combined_prompt),
+                    timeout=ADVISOR_TIMEOUT_SECONDS
+                )
+                content = response_gemini.text
+                usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                logger.info(f"[{request_id}] Gemini fallback succeeded in {(time.monotonic()-start):.2f}s")
+            except Exception as gemini_err:
+                logger.warning(f"[{request_id}] Gemini fallback failed: {gemini_err}. Trying OpenRouter fallback...")
+                provider = "openrouter"
+                try:
+                    # 3. Try OpenRouter (Tertiary)
+                    from backend.config import get_openai_client
+                    client = get_openai_client()
+                    try:
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                client.chat.completions.create,
+                                model="google/gemini-2.5-flash",
+                                messages=messages,
+                                max_tokens=400,
+                                temperature=0.4,
+                            ),
+                            timeout=ADVISOR_TIMEOUT_SECONDS
+                        )
+                    except Exception as or_paid_err:
+                        logger.warning(f"[{request_id}] OpenRouter paid model failed: {or_paid_err}. Retrying with free model...")
+                        openrouter_model = os.environ.get("OPENROUTER_FALLBACK_MODEL", "nousresearch/hermes-3-llama-3.1-405b:free")
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                client.chat.completions.create,
+                                model=openrouter_model,
+                                messages=messages,
+                                max_tokens=400,
+                                temperature=0.4,
+                            ),
+                            timeout=ADVISOR_TIMEOUT_SECONDS
+                        )
+                    content = response.choices[0].message.content
+                    usage = {
+                        "prompt_tokens":     response.usage.prompt_tokens     if response.usage else 0,
+                        "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                        "total_tokens":      response.usage.total_tokens      if response.usage else 0,
+                    }
+                    logger.info(f"[{request_id}] OpenRouter fallback succeeded in {(time.monotonic()-start):.2f}s")
+                except Exception as or_err:
+                    logger.error(f"[{request_id}] All advisor providers failed. Groq: {groq_err}, Gemini: {gemini_err}, OpenRouter: {or_err}")
+                    raise AdvisorProviderError("all_providers_failed")
 
-            logger.info(f"[{request_id}] Groq succeeded in {elapsed/1000:.2f}s | tokens={usage['total_tokens']}")
+        # Post-process response
+        elapsed = (time.monotonic() - start) * 1000  # ms
+        if content:
+            # FR-011-14: Response Length Limit
+            if len(content) > 3500:
+                content = content[:3500] + "\n\n... للمزيد من التفاصيل، أرسل سؤال محدد 🦅"
 
             # Logging (FR-011-06, SC-011-02)
             if user_id:
                 metadata = {
                     "chat_id":          str(user_id),
                     "response_time_ms": elapsed,
-                    "token_count":      usage["total_tokens"],
-                    "model_used":       GROQ_MODEL,   # ✅ اسم الـ model الحقيقي
+                    "token_count":      usage.get("total_tokens", 0),
+                    "model_used":       GROQ_MODEL if provider == "groq" else (provider),
                     "timestamp":        datetime.now(timezone.utc).isoformat(),
                 }
-                Database.save_advisor_chat(user_id, user_text, content, usage, "groq")  # ✅ provider = groq
+                Database.save_advisor_chat(user_id, user_text, content, usage, provider)
                 Database.log_activity(
                     user_id=user_id,
                     log_type="advisor_alert",
                     message=f"تحليل المستشار: {content[:100]}...",
                     metadata={**metadata, "full_response": content, "user_query": user_text},
                 )
-
             return content, usage
-
-        except asyncio.TimeoutError:
-            logger.error(f"[{request_id}] Groq Timeout ({ADVISOR_TIMEOUT_SECONDS}s)")
-            raise AdvisorTimeoutError("provider_timeout")
-        except ProviderConfigError as e:
-            logger.error(f"[{request_id}] Groq Config Error: {e}")
-            raise AdvisorProviderError("provider_config_error")
-        except Exception as e:
-            logger.error(f"[{request_id}] Groq Error: {e}")
+        else:
             raise AdvisorProviderError("provider_error")
 
     @classmethod

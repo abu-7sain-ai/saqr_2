@@ -117,20 +117,28 @@ const WorkerCard = ({
       </div>
 
       <div className="row g-3 mb-4 position-relative">
-        <div className="col-6">
+        <div className="col-4">
           <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
             بيئة التداول
           </div>
-          <div className="fw-black text-gold fs-6">
+          <div className="fw-black text-white fs-6">
             {marketLabels[worker.market_type] || 'مستقر'}
           </div>
         </div>
-        <div className="col-6 text-end">
+        <div className="col-4 text-center">
+          <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
+            الزوج
+          </div>
+          <div className="fw-black text-gold fs-6">
+            {worker.strategy_name || 'BTC/USDT'}
+          </div>
+        </div>
+        <div className="col-4 text-end">
           <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
             الاستراتيجية
           </div>
-          <div className="fw-black text-white fs-6 text-truncate">
-            {worker.strategy_name || 'NEURAL_ALPHA'}
+          <div className="fw-black text-white fs-6 text-truncate" title={worker.user_settings?.expert_signal?.name || 'تلقائي'}>
+            {worker.user_settings?.expert_signal?.name || 'تلقائي'}
           </div>
         </div>
       </div>

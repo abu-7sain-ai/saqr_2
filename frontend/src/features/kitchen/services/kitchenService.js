@@ -9,7 +9,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || defaultBackend
 
 const api = axios.create({
   baseURL: BACKEND_URL,
-  timeout: 8000 // 8 seconds — don't hang forever if backend is slow/down
+  timeout: 30000 // 30 seconds — allow enough time when database is busy with syncs
 })
 
 export const kitchenService = {

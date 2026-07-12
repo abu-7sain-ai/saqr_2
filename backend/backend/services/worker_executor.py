@@ -18,12 +18,28 @@ class WorkerExecutor:
         self.market_id = worker_data.get('market_id')
         self.logger = logging.getLogger(f"Worker.{worker_data['name']}")
         
-        # Professional Hunter/Sniper Settings
-        self.is_hunter = worker_data.get('is_hunter', False)
-        self.concurrency_mode = worker_data.get('concurrency_mode', 'fixed_count')
-        self.max_trades = worker_data.get('max_concurrent_trades', 3)
-        self.max_exposure_pct = worker_data.get('max_capital_exposure_pct', 10.0)
-        self.selection_criteria = worker_data.get('selection_criteria', 'success_rate')
+        user_settings = worker_data.get('user_settings', {})
+
+        # Professional Hunter/Sniper Settings (read from user_settings falling back to database fields)
+        self.is_hunter = user_settings.get('is_hunter', worker_data.get('is_hunter', True))
+        
+        # Concurrency mode: 'fixed_count' (limit trades to X) or 'percentage' (exposure limits)
+        raw_concurrency = user_settings.get('concurrency_mode', 
+                                            user_settings.get('maxOpenTradesType', 
+                                            worker_data.get('concurrency_mode', 'fixed_count')))
+        self.concurrency_mode = 'fixed_count' if raw_concurrency == 'limit' else raw_concurrency
+            
+        self.max_trades = int(user_settings.get('max_concurrent_trades', 
+                              user_settings.get('maxOpenTradesValue', 
+                              worker_data.get('max_concurrent_trades', 3))))
+                              
+        self.max_exposure_pct = float(user_settings.get('max_capital_exposure_pct', 
+                                     user_settings.get('tradeSizingValue', 
+                                     worker_data.get('max_capital_exposure_pct', 10.0))))
+                                     
+        self.selection_criteria = user_settings.get('selection_criteria', 
+                                  user_settings.get('selectionCriteria', 
+                                  worker_data.get('selection_criteria', 'success_rate')))
 
         # Market Instance (New Architecture)
         self.market = None
@@ -114,23 +130,67 @@ class WorkerExecutor:
             for pair, trade in active_trades.items():
                 df = await self.market.get_historical(pair, interval="1m", limit=100)
                 if not df.empty:
+                    # ✅ FIX: احسب المؤشرات الفنية قبل فحص الخروج لتفادي KeyError
+                    df = self.strategy.calculate_indicators(df)
                     await self._check_exit(df, trade, pair)
 
             # 6. SCAN WHITELIST (Entry)
             # ندخل صفقات فقط إذا كان الاتجاه غير سلبي والبيئة مطابقة
             if is_env_match and self.market_direction != "bearish" and self._can_open_more_trades(len(active_trades)):
+                tradeable_symbols = symbols["tradeable"]
+                candidates = []
+
                 # استخدام Gemini للحصول على إشارة AI مباشرة بدلاً من البوابات التقنية
                 from backend.services.gemini_signal import fetch_gemini_signal
+                # ✅ نمرر قائمة العملات المعتمدة ونوع السوق للـ Gemini Signal Engine
                 signal = await fetch_gemini_signal(
                     active_symbols=list(active_trades.keys()),
-                    worker_settings=self.worker.get('user_settings', {})
+                    worker_settings=self.worker.get('user_settings', {}),
+                    tradeable_symbols=tradeable_symbols,
+                    market_type=self.market_type
                 )
+                
                 if signal:
                     symbol = signal['symbol']
-                    if symbol not in active_trades and self._can_open_more_trades(len(active_trades)):
-                        df_1m = await self.market.get_historical(symbol, interval="1m", limit=50)
+                    if symbol not in active_trades:
+                        df_1m = await self.market.get_historical(symbol, interval="1m", limit=100)
                         if not df_1m.empty:
-                            await self._check_enter(df_1m, symbol)
+                            # ✅ احسب المؤشرات الفنية للشموع لمنع KeyError في شروط الدخول/الخروج
+                            df_1m = self.strategy.calculate_indicators(df_1m)
+                            
+                            # ✅ جلب نسبة النجاح التاريخية للمفاضلة
+                            success_rate = 50.0
+                            try:
+                                from backend.services.pattern_matcher import pattern_matcher
+                                last_row = df_1m.iloc[-1]
+                                current_state = {
+                                    "rsi": float(last_row.get('rsi', 50)),
+                                    "trend": float(last_row.get('close', 0))
+                                }
+                                report = await pattern_matcher.get_quantitative_report(
+                                    symbol=symbol,
+                                    timeframe="15m",
+                                    current_state=current_state
+                                )
+                                success_rate = float(report.get('discovery_stats', {}).get('success_rate', 50.0))
+                            except Exception as pe:
+                                self.logger.warning(f"Failed to fetch pattern matcher success rate for {symbol}: {pe}")
+                            
+                            candidates.append({
+                                "symbol": symbol,
+                                "df": df_1m,
+                                "success_rate": success_rate
+                            })
+
+                # المفاضلة والتنفيذ بناءً على نسبة النجاح التاريخية (Tie-breaking)
+                if candidates:
+                    candidates.sort(key=lambda x: x['success_rate'], reverse=True)
+                    
+                    for cand in candidates:
+                        if self._can_open_more_trades(len(active_trades)):
+                            self.logger.info(f"🎯 Execution: Entering trade for candidate {cand['symbol']} (Success Rate: {cand['success_rate']}%)")
+                            await self._check_enter(cand['df'], cand['symbol'])
+                            active_trades[cand['symbol']] = True
 
         except Exception as e:
             self.logger.error(f"Error in Worker run: {e}")

@@ -272,7 +272,9 @@ def get_gemini_client():
     if not api_key:
         raise ProviderConfigError("GEMINI_API_KEY is not configured")
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-flash-latest")
+    # gemini-2.0-flash has its own separate quota from the older 3.5-flash
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+    return genai.GenerativeModel(model_name)
 
 
 def get_groq_client():

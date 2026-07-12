@@ -62,7 +62,7 @@ async def get_system_snapshot(user_id=None):
             trades_query = supabase.table('trades').select('*')
             if user_id:
                 trades_query = trades_query.eq('user_id', user_id)
-            trades_query = trades_query.order('created_at', desc=True)
+            trades_query = trades_query.order('entry_at', desc=True)
             
             trades_resp = await asyncio.to_thread(trades_query.limit(5).execute)
             trades = trades_resp.data
