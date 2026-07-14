@@ -52,6 +52,7 @@ class HistoricalDataEngine:
         since = int(start_ms)
         batch_num = 0
 
+        consecutive_errors = 0
         while since < now_ms:
             batch_num += 1
             try:
@@ -68,9 +69,17 @@ class HistoricalDataEngine:
                     on_progress(len(all_candles), total_candles_estimate)
                 if batch_num % 5 == 0:
                     logger.info("  Batch %d: %d/%d candles", batch_num, len(all_candles), total_candles_estimate)
+                consecutive_errors = 0
                 await asyncio.sleep(0.1)
+            except ccxt.BadSymbol as e:
+                logger.error("  Symbol %s is not supported by Binance: %s", symbol, e)
+                break
             except Exception as e:
+                consecutive_errors += 1
                 logger.error("  Error at batch %d: %s", batch_num, e)
+                if consecutive_errors >= 3:
+                    logger.error("  Too many consecutive errors (%d) for %s. Stopping fetch.", consecutive_errors, symbol)
+                    break
                 await asyncio.sleep(2)
                 continue
 
