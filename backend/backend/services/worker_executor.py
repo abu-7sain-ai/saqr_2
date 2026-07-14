@@ -242,6 +242,44 @@ class WorkerExecutor:
         return True
 
     async def _check_enter(self, df: pd.DataFrame, symbol: str):
+        # Two-Layer Filter Check
+        from .filter_engine import FilterEngine
+        
+        # Check news risk for Sniper (to pause it immediately on high news risk)
+        is_sniper = (self.worker.get('owner') == 'sniper')
+        
+        if is_sniper:
+            try:
+                # Check news risk directly
+                news_risk = FilterEngine.get_news_risk(symbol)
+                if news_risk == "high":
+                    self.logger.warning(f"🚨 CRITICAL NEWS: High news risk for {symbol} on CryptoPanic. Pausing Sniper worker immediately.")
+                    # Update status in DB to paused
+                    supabase = get_supabase_client()
+                    supabase.table('workers').update({"status": "paused"}).eq('id', self.worker_id).execute()
+                    
+                    # Notify via Telegram
+                    from backend.services.notifier import Notifier
+                    asyncio.create_task(Notifier.send_telegram(f"🚨 خبر كارثي على CryptoPanic للمستودع {symbol} - تم إيقاف القناص فوراً."))
+                    return
+            except Exception as ne:
+                self.logger.error(f"Error checking sniper news risk: {ne}")
+        
+        # 1. Layer 1 Check (Free)
+        l1_passed = await FilterEngine.layer_1_check(symbol)
+        if not l1_passed:
+            self.logger.info(f"🚫 Entry Blocked: Layer 1 check failed for {symbol}.")
+            return
+            
+        # 2. Layer 2 Check (AI - Paid)
+        # Timeout 15s for Sniper
+        timeout = 15.0 if is_sniper else None
+        
+        l2_passed = await FilterEngine.layer_2_check(symbol, df, timeout=timeout)
+        if not l2_passed:
+            self.logger.info(f"🚫 Entry Blocked: Layer 2 AI check failed for {symbol}.")
+            return
+
         last_row = df.iloc[-1]
         price = float(last_row['close'])
         settings = self.worker.get('user_settings', {})
@@ -339,39 +377,68 @@ class WorkerExecutor:
                 mode = worker.get('withdrawal_mode', 'aggressive')
                 
                 returned_equity = qty * exit_price
-                new_cap = current_cap + returned_equity
                 
-                # Check if we need to sweep funds
-                if target_withdraw > 0:
-                    remaining_to_withdraw = target_withdraw
-                    sweep_amount = 0
+                # Check for buddy system transfer (Scenario 8 / Paired Bot System)
+                buddy_id = worker.get('paired_with')
+                has_transferred = False
+                
+                if buddy_id:
+                    # Get the current global market state
+                    market_state_resp = supabase.table('market_state').select('current_type').eq('id', 1).execute()
+                    current_env = market_state_resp.data[0]['current_type'] if market_state_resp.data else 'stable'
                     
-                    if mode == 'aggressive':
-                        # All returns (principal + profit) are candidates for sweeping
-                        sweep_amount = returned_equity
-                    elif mode == 'profit_only' and pnl > 0:
-                        # Only net profit is swept
-                        sweep_amount = pnl
+                    # If this worker's market type mismatches the current environment, transfer the equity to the buddy!
+                    if worker['market_type'] != current_env:
+                        buddy_resp = supabase.table('workers').select('*').eq('id', buddy_id).execute()
+                        if buddy_resp.data:
+                            buddy = buddy_resp.data[0]
+                            buddy_current_cap = float(buddy['current_capital'] or 0)
+                            new_buddy_cap = buddy_current_cap + returned_equity
+                            
+                            # Update buddy capital in database
+                            supabase.table('workers').update({"current_capital": new_buddy_cap}).eq('id', buddy_id).execute()
+                            self.logger.info(f"💸 Buddy System: Transferred ${returned_equity:.2f} from exited trade to paired worker '{buddy['name']}' ({buddy['market_type']})")
+                            
+                            # Notify via Telegram
+                            from backend.services.notifier import Notifier
+                            await Notifier.send_telegram(f"💸 <b>نظام الأصدقاء:</b> تم تحويل <b>${returned_equity:.2f}</b> من صفقة مقفلة على <b>{worker['name']}</b> إلى صديقه المقابل <b>{buddy['name']}</b> بسبب تغير حالة السوق.")
+                            
+                            has_transferred = True
+                            
+                if not has_transferred:
+                    new_cap = current_cap + returned_equity
                     
-                    if sweep_amount > 0:
-                        actual_sweep = min(sweep_amount, remaining_to_withdraw)
+                    # Check if we need to sweep funds
+                    if target_withdraw > 0:
+                        remaining_to_withdraw = target_withdraw
+                        sweep_amount = 0
                         
-                        new_cap -= actual_sweep
-                        new_pending = target_withdraw - actual_sweep
-                        new_withdrawn = already_withdrawn + actual_sweep
+                        if mode == 'aggressive':
+                            # All returns (principal + profit) are candidates for sweeping
+                            sweep_amount = returned_equity
+                        elif mode == 'profit_only' and pnl > 0:
+                            # Only net profit is swept
+                            sweep_amount = pnl
                         
-                        # Update worker with liquidation progress
-                        supabase.table('workers').update({
-                            "current_capital": new_cap,
-                            "pending_withdrawal_amount": new_pending,
-                            "withdrawn_amount": new_withdrawn
-                        }).eq('id', self.worker_id).execute()
-                        
-                        self.logger.info(f"🧹 Swept ${actual_sweep} into freed pool. Remaining target: ${new_pending}")
+                        if sweep_amount > 0:
+                            actual_sweep = min(sweep_amount, remaining_to_withdraw)
+                            
+                            new_cap -= actual_sweep
+                            new_pending = target_withdraw - actual_sweep
+                            new_withdrawn = already_withdrawn + actual_sweep
+                            
+                            # Update worker with liquidation progress
+                            supabase.table('workers').update({
+                                "current_capital": new_cap,
+                                "pending_withdrawal_amount": new_pending,
+                                "withdrawn_amount": new_withdrawn
+                            }).eq('id', self.worker_id).execute()
+                            
+                            self.logger.info(f"🧹 Swept ${actual_sweep} into freed pool. Remaining target: ${new_pending}")
+                        else:
+                            self._db_update_capital(new_cap)
                     else:
                         self._db_update_capital(new_cap)
-                else:
-                    self._db_update_capital(new_cap)
             
             from backend.services.notifier import Notifier
             asyncio.create_task(Notifier.notify_trade_exit(self.worker['name'], position['pair'], pnl, pnl >= 0))

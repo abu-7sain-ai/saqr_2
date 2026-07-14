@@ -410,8 +410,12 @@ async def scheduled_health_check():
     except Exception as e: logger.error(f"Health check error: {e}")
 
 async def scheduled_market_check():
-    try: await AnalyticsService.update_market_state()
-    except Exception as e: logger.error(f"Market check error: {e}")
+    try:
+        from backend.services.market_watcher import MarketWatcher
+        watcher = MarketWatcher()
+        await watcher.check_and_process()
+    except Exception as e:
+        logger.error(f"Market check error: {e}")
 
 async def scheduled_worker_run():
     try: await WorkerEngine.run_all_workers()

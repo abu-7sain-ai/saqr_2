@@ -138,13 +138,33 @@ class MarketWatcher:
         workers_resp = self.supabase.table('workers').select('*').eq('status', 'running').execute()
         workers = workers_resp.data
 
+        from .notifier import Notifier
+
         for worker in workers:
-            # 1. Paired workers: Stable-Aviator toggle
-            if worker.get('paired_with'):
-                # Handle pairing logic (Switch roles)
-                pass 
-            
-            # 2. Unpaired workers: Stop if mismatch
+            # If the worker does NOT match the new market type
             if worker['market_type'] != market_type:
-                logger.info(f"Stopping worker {worker['name']} due to market mismatch ({market_type})")
-                self.supabase.table('workers').update({'status': 'stopped'}).eq('id', worker['id']).execute()
+                buddy_id = worker.get('paired_with')
+                
+                # 1. Buddy Toggle Logic
+                if buddy_id:
+                    # Find and activate buddy
+                    buddy_resp = self.supabase.table('workers').select('*').eq('id', buddy_id).execute()
+                    if buddy_resp.data:
+                        buddy = buddy_resp.data[0]
+                        if buddy.get('status') != 'running':
+                            # Activate the buddy
+                            self.supabase.table('workers').update({'status': 'running'}).eq('id', buddy_id).execute()
+                            logger.info(f"🔄 Buddy System Toggle: Activated paired worker '{buddy['name']}' ({buddy['market_type']})")
+                            await Notifier.send_telegram(f"🔄 تم تفعيل الموظف الصديق <b>{buddy['name']}</b> لمجابهة السوق الجديد ({market_type}) 🦅")
+                
+                # 2. Check if current worker has active open trades
+                trades_resp = self.supabase.table('trades').select('id').eq('worker_id', worker['id']).is_('exit_at', 'null').execute()
+                has_active_trades = len(trades_resp.data) > 0 if trades_resp.data else False
+                
+                if not has_active_trades:
+                    logger.info(f"Stopping worker {worker['name']} (no active trades & market mismatch)")
+                    self.supabase.table('workers').update({'status': 'stopped'}).eq('id', worker['id']).execute()
+                    await Notifier.send_telegram(f"⏹️ تم إيقاف الموظف <b>{worker['name']}</b> لعدم تطابق السوق الحالي مع استراتيجيته وعدم وجود صفقات مفتوحة.")
+                else:
+                    logger.info(f"Worker {worker['name']} has active trades. Keeping status 'running' in safe mode to manage exits.")
+
