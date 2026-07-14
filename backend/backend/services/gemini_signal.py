@@ -97,10 +97,10 @@ async def _get_signal_from_ai(
             if signal:
                 return signal
         except Exception as e:
-            logger.error(f"❌ Direct Gemini call failed: {e}. Falling back to OpenRouter...")
+            logger.error(f"❌ Direct Gemini call failed: {e}. Falling back to Groq...")
 
-    logger.info("🟡 محاولة جلب الإشارة باستخدام OpenRouter...")
-    return await _call_openrouter(worker_settings, tradeable_symbols, market_type)
+    logger.info("🟡 محاولة جلب الإشارة باستخدام Groq...")
+    return await _call_groq_fallback(worker_settings, tradeable_symbols, market_type)
 
 
 async def _call_gemini_directly(
@@ -181,16 +181,13 @@ async def _call_gemini_directly(
         raise e
 
 
-async def _call_openrouter(
+async def _call_groq_fallback(
     worker_settings: Dict[str, Any],
     tradeable_symbols: List[str] = None,
     market_type: str = "crypto",
 ) -> Optional[Dict[str, Any]]:
     import re
-
-    if not OPENROUTER_API_KEY:
-        logger.warning("⚠️ OPENROUTER_API_KEY غير مضبوط في .env")
-        return None
+    from backend.config import get_groq_client
 
     tp = float(worker_settings.get("tpValue", 5.0))
     sl = float(worker_settings.get("slValue", 2.0))
@@ -221,59 +218,19 @@ async def _call_openrouter(
         )
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                OPENROUTER_URL,
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://saqr-trading.app",
-                    "X-Title": "Saqr Trading Bot",
-                },
-                json={
-                    "model": MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
-                    "max_tokens": 150,
-                },
-            )
-
-        # Fallback to free model on OpenRouter if paid model returns 402 (payment/credits) or other failures
-        if not resp.is_success or resp.status_code == 402:
-            fallback_model = os.environ.get("OPENROUTER_FALLBACK_MODEL", "nousresearch/hermes-3-llama-3.1-405b:free")
-            logger.warning(f"⚠️ OpenRouter paid model failed with {resp.status_code}. Retrying with free model: {fallback_model}...")
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    OPENROUTER_URL,
-                    headers={
-                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://saqr-trading.app",
-                        "X-Title": "Saqr Trading Bot",
-                    },
-                    json={
-                        "model": fallback_model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.3,
-                        "max_tokens": 150,
-                    },
-                )
-
-        if resp.status_code == 429:
-            logger.warning("⏳ OpenRouter: rate limit")
-            return None
-        if not resp.is_success:
-            logger.error(f"OpenRouter HTTP {resp.status_code}: {resp.text[:200]}")
-            return None
-
-        body = resp.json()
-        text = (
-            body.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
+        client = get_groq_client()
+        model_name = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+        
+        chat_completion = await asyncio.to_thread(
+            client.chat.completions.create,
+            messages=[{"role": "user", "content": prompt}],
+            model=model_name,
+            temperature=0.3,
+            max_tokens=150
         )
-        logger.info(f"🤖 OpenRouter raw: {text}")
+        
+        text = chat_completion.choices[0].message.content.strip()
+        logger.info(f"🤖 Groq raw: {text}")
 
         line = next((l for l in text.splitlines() if "SIGNAL:" in l.upper()), "")
         match = re.search(
@@ -282,7 +239,7 @@ async def _call_openrouter(
             line, re.IGNORECASE,
         )
         if not match:
-            logger.warning(f"⚠️ OpenRouter: تنسيق غير مفهوم → {line}")
+            logger.warning(f"⚠️ Groq: تنسيق غير مفهوم → {line}")
             return None
 
         symbol_raw, tp_raw, sl_raw, confidence, reason = match.groups()
@@ -294,10 +251,10 @@ async def _call_openrouter(
 
         matched_symbol = find_matching_symbol(symbol_raw, tradeable_symbols)
         if not matched_symbol:
-            logger.warning(f"⚠️ OpenRouter suggested {symbol_raw} which is not in whitelist!")
+            logger.warning(f"⚠️ Groq suggested {symbol_raw} which is not in whitelist!")
             return None
 
-        logger.info(f"✅ Signal جديد: {matched_symbol} | TP:{tp_raw}% | SL:{sl_raw}% | {confidence} | {reason or ''}")
+        logger.info(f"✅ Signal جديد من Groq: {matched_symbol} | TP:{tp_raw}% | SL:{sl_raw}% | {confidence} | {reason or ''}")
         return {
             "symbol": matched_symbol,
             "tp_percent": float(tp_raw),
@@ -306,9 +263,9 @@ async def _call_openrouter(
             "reason": (reason or "").strip(),
         }
 
-    except asyncio.timeoutError:
-        logger.error("⏰ OpenRouter timeout")
+    except asyncio.TimeoutError:
+        logger.error("⏰ Groq timeout")
         return None
     except Exception as e:
-        logger.error(f"OpenRouter error: {e}")
+        logger.error(f"Groq error: {e}")
         return None

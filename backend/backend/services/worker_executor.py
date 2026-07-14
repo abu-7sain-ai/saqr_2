@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from ..strategies.prince_stable import PrinceStableStrategy
 from ..strategies.dynamic_strategy import DynamicStrategy
-from ..config import get_supabase_client
+from ..config import get_supabase_admin_client as get_supabase_client
 from .exchange_service import get_market_instance
 
 logger = logging.getLogger(__name__)
@@ -259,7 +259,7 @@ class WorkerExecutor:
         qty = order_value / price
         try:
             # 1. Place order on Exchange (Live/Paper)
-            if self.market:
+            if self.market and not self.is_paper:
                 # Buy Order
                 await self.market.buy(symbol, qty)
                 # Hard Stop Loss Order
@@ -267,6 +267,8 @@ class WorkerExecutor:
                 sl_price = price * (1 - (sl_val / 100))
                 await self.market.place_stop_loss(symbol, sl_price, qty)
                 self.logger.info(f"✅ Order & Hard SL placed on Exchange for {symbol}")
+            else:
+                self.logger.info(f"✅ [Paper Mode] Mock order & SL placed locally for {symbol} at {price}")
 
             # 2. Record in DB
             supabase = get_supabase_client()
@@ -277,10 +279,6 @@ class WorkerExecutor:
                 "entry_price": price,
                 "amount_actual": qty,
                 "entry_at": datetime.now().isoformat(),
-                "tp_type": settings.get('tpType', 'recommended'),
-                "sl_type": settings.get('slType', 'recommended_trailing'),
-                "tp_value": float(settings.get('tpValue', 5.0)),
-                "sl_value": float(settings.get('slValue', 2.0)),
             }
             supabase.table('trades').insert(trade_data).execute()
             self._db_update_capital(available_cap - order_value)
@@ -319,8 +317,10 @@ class WorkerExecutor:
         pnl = (exit_price - entry_price) * qty
         try:
             # 1. Execute on Exchange
-            if self.market:
+            if self.market and not self.is_paper:
                 await self.market.sell(position['pair'], qty)
+            else:
+                self.logger.info(f"✅ [Paper Mode] Mock exit executed locally for {position['pair']} at {exit_price}")
 
             # 2. Update DB
             supabase = get_supabase_client()

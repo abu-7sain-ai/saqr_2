@@ -62,4 +62,4 @@ class WorkerEngine:
                     logger.info(f"Skipping worker {worker['name']}: Market mismatch ({worker['market_type']} vs {current_market})")
 
         except Exception as e:
-            logger.error(f"Error in WorkerEngine: {e}")
+            logger.exception("Error in WorkerEngine:")

@@ -12,9 +12,32 @@ class DynamicStrategy(BaseStrategy):
         super().__init__(name="Dynamic Strategist", params=params)
         # استخراج الإشارة من المعاملات
         self.signal = self.params.get('expert_signal', {})
-        self.entry_price = float(self.signal.get('entry', 0))
-        self.targets = [float(t) for t in self.signal.get('targets', [])]
-        self.sl_price = float(self.signal.get('sl', 0))
+        
+        # Safe entry price parsing
+        entry_val = self.signal.get('entry', 0)
+        try:
+            self.entry_price = float(entry_val)
+        except (ValueError, TypeError):
+            self.entry_price = 0.0
+            
+        # Safe targets parsing
+        targets_val = self.signal.get('targets', [])
+        if not isinstance(targets_val, list):
+            targets_val = [targets_val]
+            
+        self.targets = []
+        for t in targets_val:
+            try:
+                self.targets.append(float(t))
+            except (ValueError, TypeError):
+                pass
+                
+        # Safe sl parsing
+        sl_val = self.signal.get('sl', 0)
+        try:
+            self.sl_price = float(sl_val)
+        except (ValueError, TypeError):
+            self.sl_price = 0.0
 
     def should_enter(self, df: pd.DataFrame) -> bool:
         """
