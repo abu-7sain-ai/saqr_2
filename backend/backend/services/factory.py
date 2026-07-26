@@ -313,9 +313,30 @@ class StrategyFactory:
             })
 
             user_ws = session.get('worker_settings', {})
-            for strat in passed_strategies:
+            num_workers = len(passed_strategies)
+
+            # Fetch active market symbols for multi-symbol distribution if general market is selected
+            candidate_symbols = [symbol]
+            if symbol in ['BTC/USDT', 'ALL'] or not session.get('symbol'):
+                try:
+                    from backend.config import get_supabase_admin_client
+                    sp = get_supabase_admin_client()
+                    whitelist_resp = sp.table('whitelist').select('symbol').eq('is_active', True).execute()
+                    if whitelist_resp.data:
+                        cand = [r['symbol'] for r in whitelist_resp.data if r.get('symbol')]
+                        if cand:
+                            # Prioritize top pairs: BTC, ETH, SOL, BNB, ADA, etc.
+                            candidate_symbols = cand
+                except Exception as ex:
+                    logger.warning(f"[{session_id}] Could not fetch whitelist symbols for multi-pair assignment: {ex}")
+
+            for idx, strat in enumerate(passed_strategies):
                 m_type = "advanced" if strat in advanced_strategies else "standard"
-                await self._spawn_worker(session_id, user_id, market_id, symbol, strat, user_ws, m_type)
+                assigned_sym = candidate_symbols[idx % len(candidate_symbols)]
+                await self._spawn_worker(
+                    session_id, user_id, market_id, assigned_sym, strat, user_ws, m_type,
+                    worker_index=idx, total_workers=num_workers
+                )
 
             await self._safe_notify(Notifier.notify_session_ready(session_id, symbol, len(passed_strategies)))
             logger.info(f"✅ Session {session_id} completed successfully with {len(passed_strategies)} strategies.")
@@ -329,7 +350,7 @@ class StrategyFactory:
             self.db.update_session_data(session_id, {"status": "failed", "expert_opinions": {"error": str(e)}})
             await self._safe_notify(Notifier.notify_session_fail(session_id, str(e)))
 
-    async def _spawn_worker(self, session_id, user_id, market_id, symbol, strategy, user_ws, model_type):
+    async def _spawn_worker(self, session_id, user_id, market_id, symbol, strategy, user_ws, model_type, worker_index=0, total_workers=1):
         try:
             strat_name  = strategy.get('name', f"استراتيجية {model_type}")
             worker_name = f"{'[ADVANCED]' if model_type == 'advanced' else '[STANDARD]'} {strat_name}"
@@ -349,8 +370,19 @@ class StrategyFactory:
             raw_type = user_ws.get('workerType', user_ws.get('type', 'paper'))
             safe_type = raw_type.lower() if isinstance(raw_type, str) and raw_type.lower() in ('paper', 'live') else 'paper'
 
-            # ✅ FIX 2: capital من worker_settings اللي جت من الـ session
-            capital = float(user_ws.get('capital', user_ws.get('portfolioValue', 1000)))
+            # ✅ FIX 2: Dynamic Liquidity Allocation
+            total_capital = float(user_ws.get('capital', user_ws.get('portfolioValue', 1000)))
+            portfolio_share_type = user_ws.get('portfolioShareType', 'percent_comp')
+
+            if portfolio_share_type == 'fixed':
+                capital = total_capital
+            else:
+                # Divide total capital among spawned workers with slight strategic variation
+                base_share = total_capital / max(1, total_workers)
+                # Apply slight variance (-10% to +10%) based on index to differentiate initial capitals
+                variance_factors = [1.10, 0.95, 1.05, 0.90, 1.00, 1.02, 0.98]
+                factor = variance_factors[worker_index % len(variance_factors)]
+                capital = round(base_share * factor, 2)
 
             # ✅ FIX 3: strategy_name بدل pair (workers table مفيش فيه عمود pair)
             worker_data = {
@@ -359,7 +391,7 @@ class StrategyFactory:
                 "name":                  worker_name,
                 "market_id":             safe_market_id,
                 "market_type":           user_ws.get('marketType', 'stable'),
-                "strategy_name":         symbol,   # بنحفظ الـ symbol هنا
+                "strategy_name":         symbol,   # بنحفظ الـ symbol الخاص بالموظف
                 "type":                  safe_type,
                 "user_settings":         {**user_ws, "expert_signal": strategy, "symbol": symbol},
                 "starting_capital":      capital,
@@ -369,7 +401,7 @@ class StrategyFactory:
             }
             result = self.db.clone_worker_direct(worker_data)
             if result:
-                logger.info(f"[{session_id}] ✅ Spawned {model_type} worker: {worker_name} (id={result.get('id')})")
+                logger.info(f"[{session_id}] ✅ Spawned {model_type} worker: {worker_name} ({symbol}, capital=${capital}) (id={result.get('id')})")
             else:
                 logger.error(f"[{session_id}] ❌ clone_worker_direct returned None for {worker_name}")
         except Exception as e:

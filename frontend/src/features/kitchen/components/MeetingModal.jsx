@@ -152,7 +152,7 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
       const symbols = await kitchenService.getMarketSymbols(mId)
       const list = symbols || []
       // Add Market Proxy option
-      const finalSymbols = [{ symbol: 'دراسة السوق العام (BTC Proxy)', realSymbol: 'BTC/USDT' }, ...list]
+      const finalSymbols = [{ symbol: '🌐 دراسة السوق العام (توزيع متعدد العملات)', realSymbol: 'BTC/USDT' }, ...list]
       setAvailableSymbols(finalSymbols)
       setSymbol(finalSymbols[0].realSymbol || finalSymbols[0].symbol)
     } catch (err) {

@@ -130,7 +130,7 @@ const WorkerCard = ({
             الزوج
           </div>
           <div className="fw-black text-gold fs-6">
-            {worker.strategy_name || 'BTC/USDT'}
+            {worker.user_settings?.symbol || worker.strategy_name || worker.pair || 'BTC/USDT'}
           </div>
         </div>
         <div className="col-4 text-end">
