@@ -80,39 +80,43 @@ const SyncCounter = ({ marketId }) => {
         const symbols = wlSymbols.map(r => r.symbol)
         const totalSymbols = symbols.length
 
-        // Count synced symbols (those that have at least 1 OHLCV record)
-        let syncedCount = 0
-        let latestTimestamp = null
+        // 1. Check historical_sync_status table
+        const { data: syncRecords } = await supabase
+          .from('historical_sync_status')
+          .select('symbol, updated_at')
+          .eq('data_type', 'ohlcv')
 
-        // Check in batches of 10
-        for (let i = 0; i < symbols.length; i += 10) {
-          const batch = symbols.slice(i, i + 10)
-          const { data: rows } = await supabase
-            .from('historical_ohlcv')
-            .select('symbol, timestamp')
-            .in('symbol', batch)
-            .order('timestamp', { ascending: false })
-            .limit(batch.length * 2)
+        const syncedSet = new Set((syncRecords || []).map(r => r.symbol))
+        
+        // 2. Check historical_ohlcv for any symbols not yet in status table
+        const remainingToMatch = symbols.filter(s => !syncedSet.has(s))
+        if (remainingToMatch.length > 0) {
+          for (let i = 0; i < remainingToMatch.length; i += 20) {
+            const batch = remainingToMatch.slice(i, i + 20)
+            const { data: rows } = await supabase
+              .from('historical_ohlcv')
+              .select('symbol')
+              .in('symbol', batch)
 
-          if (rows && rows.length > 0) {
-            const syncedInBatch = new Set(rows.map(r => r.symbol)).size
-            syncedCount += syncedInBatch
-            const batchLatest = rows[0]?.timestamp
-            if (batchLatest && (!latestTimestamp || batchLatest > latestTimestamp)) {
-              latestTimestamp = batchLatest
+            if (rows && rows.length > 0) {
+              rows.forEach(r => syncedSet.add(r.symbol))
             }
           }
         }
 
+        const syncedCount = symbols.filter(s => syncedSet.has(s)).length
+        const latestTimestamp = syncRecords?.[0]?.updated_at || null
+
         setSyncInfo({ count: syncedCount, total: totalSymbols, last: latestTimestamp })
       } catch (err) {
+        console.error('SyncCounter error:', err)
         setSyncInfo({ count: 0, total: 0, last: null })
       } finally {
         setLoading(false)
       }
     }
     load()
-    const t = setInterval(load, 60000)
+    const t = setInterval(load, 15000)
     return () => clearInterval(t)
   }, [marketId])
 
