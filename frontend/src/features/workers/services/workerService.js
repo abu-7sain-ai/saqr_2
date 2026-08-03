@@ -100,12 +100,46 @@ export const workerService = {
     return data.reduce((sum, w) => sum + (parseFloat(w.withdrawn_amount) || 0), 0)
   },
 
-  /**
-   * Fetch detailed trades history and metrics for a specific worker
-   */
   async getWorkerTrades(workerId) {
-    const response = await fetch(`${BACKEND_URL}/api/v1/workers/${workerId}/trades`)
-    if (!response.ok) throw new Error('فشل جلب سجل صفقات الموظف')
-    return await response.json()
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/v1/workers/${workerId}/trades`)
+      if (response.ok) {
+        return await response.json()
+      }
+    } catch (e) {
+      console.warn('Backend endpoint unavailable, falling back to direct Supabase query:', e)
+    }
+
+    // Direct Supabase fallback
+    const { data: worker } = await supabase.from('workers').select('*').eq('id', workerId).single()
+    const { data: tradesData } = await supabase.from('trades').select('*').eq('worker_id', workerId).order('entry_at', { ascending: false })
+
+    const trades = tradesData || []
+    const total_trades = trades.length
+    const closed_trades = trades.filter(t => t.exit_at)
+    const winning_trades = closed_trades.filter(t => (parseFloat(t.result) || 0) > 0)
+    const losing_trades = closed_trades.filter(t => (parseFloat(t.result) || 0) < 0)
+    const total_pnl = closed_trades.reduce((acc, t) => acc + (parseFloat(t.result) || 0), 0)
+    const win_rate = closed_trades.length > 0 ? (winning_trades.length / closed_trades.length) * 100 : 0
+    const traded_symbols = Array.from(new Set(trades.map(t => t.pair).filter(Boolean)))
+
+    return {
+      worker_id: workerId,
+      worker_name: worker?.name,
+      strategy_name: worker?.strategy_name || worker?.user_settings?.expert_signal?.name || 'تلقائي',
+      starting_capital: parseFloat(worker?.starting_capital || 0),
+      current_capital: parseFloat(worker?.current_capital || 0),
+      summary: {
+        total_trades,
+        closed_trades: closed_trades.length,
+        open_trades: total_trades - closed_trades.length,
+        winning_trades: winning_trades.length,
+        losing_trades: losing_trades.length,
+        win_rate: parseFloat(win_rate.toFixed(2)),
+        net_pnl: parseFloat(total_pnl.toFixed(2)),
+        traded_symbols
+      },
+      trades
+    }
   }
 }

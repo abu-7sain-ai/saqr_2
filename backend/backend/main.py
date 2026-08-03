@@ -323,7 +323,7 @@ async def clone_worker(req: CloneWorkerRequest):
 async def get_worker_trades(worker_id: str):
     """Fetch detailed trade history & calculated performance statistics for a specific worker."""
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         w_resp = supabase.table('workers').select('*').eq('id', worker_id).execute()
         if not w_resp.data:
             raise HTTPException(status_code=404, detail="Worker not found")

@@ -458,7 +458,7 @@ const WorkersPage = () => {
                           )}
                         </>
                       ) : (
-                        <div className="text-center py-3 text-secondary extra-small">تعذر جلب صفقات الموظف</div>
+                        <div className="text-center py-3 text-secondary extra-small">لا يوجد صفقات لهذا الموظف حتى الآن</div>
                       )}
                     </div>
                   </div>
