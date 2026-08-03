@@ -38,11 +38,17 @@ const WorkersPage = () => {
 
   useEffect(() => {
     if (selectedWorker?.id) {
-      setLoadingTrades(true)
-      workerService.getWorkerTrades(selectedWorker.id)
-        .then(data => setWorkerTradesData(data))
-        .catch(err => console.error(err))
-        .finally(() => setLoadingTrades(false))
+      const cached = workerService._tradesCache?.[selectedWorker.id]
+      if (cached && (Date.now() - cached.timestamp < 15000)) {
+        setWorkerTradesData(cached.data)
+        setLoadingTrades(false)
+      } else {
+        setLoadingTrades(true)
+        workerService.getWorkerTrades(selectedWorker.id, selectedWorker)
+          .then(data => setWorkerTradesData(data))
+          .catch(err => console.error(err))
+          .finally(() => setLoadingTrades(false))
+      }
     } else {
       setWorkerTradesData(null)
     }
