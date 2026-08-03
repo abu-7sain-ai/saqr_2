@@ -319,6 +319,53 @@ async def clone_worker(req: CloneWorkerRequest):
         logger.error(f"Worker cloning failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/v1/workers/{worker_id}/trades", tags=["Workers"])
+async def get_worker_trades(worker_id: str):
+    """Fetch detailed trade history & calculated performance statistics for a specific worker."""
+    try:
+        supabase = get_supabase_client()
+        w_resp = supabase.table('workers').select('*').eq('id', worker_id).execute()
+        if not w_resp.data:
+            raise HTTPException(status_code=404, detail="Worker not found")
+        worker = w_resp.data[0]
+
+        trades_resp = supabase.table('trades').select('*').eq('worker_id', worker_id).order('entry_at', desc=True).execute()
+        trades = trades_resp.data or []
+
+        total_trades = len(trades)
+        closed_trades = [t for t in trades if t.get('exit_at')]
+        winning_trades = [t for t in closed_trades if float(t.get('result', 0) or 0) > 0]
+        losing_trades = [t for t in closed_trades if float(t.get('result', 0) or 0) < 0]
+        
+        total_pnl = sum(float(t.get('result', 0) or 0) for t in closed_trades)
+        win_rate = (len(winning_trades) / len(closed_trades) * 100) if closed_trades else 0.0
+        
+        traded_symbols = list(set([t.get('pair') for t in trades if t.get('pair')]))
+
+        return {
+            "worker_id": worker_id,
+            "worker_name": worker.get('name'),
+            "strategy_name": worker.get('strategy_name') or (worker.get('user_settings') or {}).get('expert_signal', {}).get('name', 'تلقائي'),
+            "starting_capital": float(worker.get('starting_capital', 0) or 0),
+            "current_capital": float(worker.get('current_capital', 0) or 0),
+            "summary": {
+                "total_trades": total_trades,
+                "closed_trades": len(closed_trades),
+                "open_trades": total_trades - len(closed_trades),
+                "winning_trades": len(winning_trades),
+                "losing_trades": len(losing_trades),
+                "win_rate": round(win_rate, 2),
+                "net_pnl": round(total_pnl, 2),
+                "traded_symbols": traded_symbols
+            },
+            "trades": trades
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching worker trades for {worker_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/v1/kitchen/sessions", tags=["Kitchen"])
 async def get_kitchen_sessions(market_type: str = None):
     try:

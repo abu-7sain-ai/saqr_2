@@ -98,5 +98,14 @@ export const workerService = {
     }
 
     return data.reduce((sum, w) => sum + (parseFloat(w.withdrawn_amount) || 0), 0)
+  },
+
+  /**
+   * Fetch detailed trades history and metrics for a specific worker
+   */
+  async getWorkerTrades(workerId) {
+    const response = await fetch(`${BACKEND_URL}/api/v1/workers/${workerId}/trades`)
+    if (!response.ok) throw new Error('فشل جلب سجل صفقات الموظف')
+    return await response.json()
   }
 }

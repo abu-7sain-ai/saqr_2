@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
-import { User, Shield, Bell, Save, AlertCircle, CheckCircle, Cpu, UserPlus, X } from 'lucide-react'
+import { User, Shield, Bell, Save, AlertCircle, CheckCircle, Cpu, UserPlus, X, Sparkles } from 'lucide-react'
 import ProfileTab from '../components/ProfileTab'
 import NotificationsTab from '../components/NotificationsTab'
 import BrainsTab from '../components/BrainsTab'
+import ExpertPromptsTab from '../components/ExpertPromptsTab'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettingStore } from '../store/useSettingStore'
 import { supabase } from '../../../services/supabase'
@@ -127,7 +128,8 @@ const SettingsPage = () => {
   const tabs = [
     { id: 'profile', label: 'إعدادات الحساب', icon: <User size={18} /> },
     { id: 'notifications', label: 'التنبيهات', icon: <Bell size={18} /> },
-    { id: 'brains', label: 'العقول والذكاء', icon: <Cpu size={18} /> }
+    { id: 'brains', label: 'العقول والذكاء', icon: <Cpu size={18} /> },
+    { id: 'experts', label: 'الخبراء والبرومبتات', icon: <Sparkles size={18} /> }
   ]
 
   return (
@@ -207,8 +209,9 @@ const SettingsPage = () => {
             ) : (
               <>
                 {activeTab === 'profile' && <ProfileTab />}
-                                {activeTab === 'notifications' && <NotificationsTab />}
+                {activeTab === 'notifications' && <NotificationsTab />}
                 {activeTab === 'brains' && <BrainsTab />}
+                {activeTab === 'experts' && <ExpertPromptsTab />}
               </>
             )}
           </div>

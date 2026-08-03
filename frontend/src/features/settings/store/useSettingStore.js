@@ -36,6 +36,9 @@ export const useSettingStore = create((set, get) => ({
   aiForm: {
     openRouterKey: ''
   },
+  expertPromptsForm: {},
+  expertModelsForm: {},
+  customExpertsForm: [],
 
   /**
    * Initialize state from database
@@ -74,6 +77,9 @@ export const useSettingStore = create((set, get) => ({
         aiForm: {
           openRouterKey: data.settings?.openrouter_key || ''
         },
+        expertPromptsForm: data.settings?.expert_prompts || {},
+        expertModelsForm: data.settings?.expert_models || {},
+        customExpertsForm: data.settings?.custom_experts || [],
         loading: false
       })
     } catch (err) {
@@ -134,6 +140,45 @@ export const useSettingStore = create((set, get) => ({
     }))
   },
 
+  setExpertPrompt: (expertId, promptText) => {
+    set((state) => ({
+      expertPromptsForm: { ...state.expertPromptsForm, [expertId]: promptText },
+      success: null
+    }))
+  },
+
+  setExpertModel: (expertId, modelName) => {
+    set((state) => ({
+      expertModelsForm: { ...state.expertModelsForm, [expertId]: modelName },
+      success: null
+    }))
+  },
+
+  addCustomExpert: (newExpert) => {
+    set((state) => ({
+      customExpertsForm: [...state.customExpertsForm, newExpert],
+      expertPromptsForm: { ...state.expertPromptsForm, [newExpert.id]: newExpert.defaultPrompt },
+      expertModelsForm: { ...state.expertModelsForm, [newExpert.id]: newExpert.model },
+      success: null
+    }))
+  },
+
+  deleteCustomExpert: (expertId) => {
+    set((state) => {
+      const updatedCustom = state.customExpertsForm.filter(e => e.id !== expertId)
+      const updatedPrompts = { ...state.expertPromptsForm }
+      const updatedModels = { ...state.expertModelsForm }
+      delete updatedPrompts[expertId]
+      delete updatedModels[expertId]
+      return {
+        customExpertsForm: updatedCustom,
+        expertPromptsForm: updatedPrompts,
+        expertModelsForm: updatedModels,
+        success: null
+      }
+    })
+  },
+
   /**
    * Save all settings to backend
    */
@@ -142,13 +187,17 @@ export const useSettingStore = create((set, get) => ({
       set({ saving: true, error: null, success: null })
       const { profileForm, notificationsForm, platformsForm } = get()
 
-      // 1. Update Profile & Telegram
+      // 1. Update Profile & Telegram & Expert Settings
       await settingService.updateProfile(userId, {
         full_name: profileForm.full_name,
         role: profileForm.role,
         settings: {
+          ...(get().profile?.settings || {}),
           telegram_chat_id: notificationsForm.telegramChatId,
-          openrouter_key: get().aiForm.openRouterKey
+          openrouter_key: get().aiForm.openRouterKey,
+          expert_prompts: get().expertPromptsForm || {},
+          expert_models: get().expertModelsForm || {},
+          custom_experts: get().customExpertsForm || []
         }
       })
 

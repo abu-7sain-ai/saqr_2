@@ -97,6 +97,14 @@ class StrategyFactory:
             self._current_plan = None
             self._user_profile = None
 
+        user_settings = self.db.get_user_settings(user_id) if user_id else {}
+        self._custom_prompts = user_settings.get('expert_prompts') or {}
+        custom_models = user_settings.get('expert_models') or {}
+        if custom_models:
+            for k, v in custom_models.items():
+                if v:
+                    self.experts[k] = v
+
         logger.info(f"🚀 Starting Scientific Council for Session {session_id}")
         await self._safe_notify(Notifier.notify_session_start(session_id, symbol))
         issuers = session.get('issuers', ['prince'])
@@ -332,9 +340,8 @@ class StrategyFactory:
 
             for idx, strat in enumerate(passed_strategies):
                 m_type = "advanced" if strat in advanced_strategies else "standard"
-                assigned_sym = candidate_symbols[idx % len(candidate_symbols)]
                 await self._spawn_worker(
-                    session_id, user_id, market_id, assigned_sym, strat, user_ws, m_type,
+                    session_id, user_id, market_id, "ALL", strat, user_ws, m_type,
                     worker_index=idx, total_workers=num_workers
                 )
 
@@ -391,9 +398,9 @@ class StrategyFactory:
                 "name":                  worker_name,
                 "market_id":             safe_market_id,
                 "market_type":           user_ws.get('marketType', 'stable'),
-                "strategy_name":         symbol,   # بنحفظ الـ symbol الخاص بالموظف
+                "strategy_name":         strat_name,   # اسم الاستراتيجية
                 "type":                  safe_type,
-                "user_settings":         {**user_ws, "expert_signal": strategy, "symbol": symbol},
+                "user_settings":         {**user_ws, "expert_signal": strategy, "symbol": "ALL"},
                 "starting_capital":      capital,
                 "current_capital":       capital,
                 "status":                "running",
@@ -401,7 +408,7 @@ class StrategyFactory:
             }
             result = self.db.clone_worker_direct(worker_data)
             if result:
-                logger.info(f"[{session_id}] ✅ Spawned {model_type} worker: {worker_name} ({symbol}, capital=${capital}) (id={result.get('id')})")
+                logger.info(f"[{session_id}] ✅ Spawned {model_type} worker: {worker_name} (All Whitelist, capital=${capital}) (id={result.get('id')})")
             else:
                 logger.error(f"[{session_id}] ❌ clone_worker_direct returned None for {worker_name}")
         except Exception as e:
@@ -490,7 +497,11 @@ class StrategyFactory:
                     logger.error(f"[_call_ai] Expert '{expert_key}' failed after {max_retries} attempts: {err_str}")
                     return f"Error after {max_retries} retries: {err_str[:200]}"
 
-        return f"Error: max retries exceeded for expert '{expert_key}'"
+    def _get_prompt(self, expert_key: str, default_prompt: str, context: str = "") -> str:
+        custom_p = getattr(self, '_custom_prompts', {}).get(expert_key)
+        if custom_p and str(custom_p).strip():
+            return f"{custom_p}\n\n[معلومات وسياق الجلسة الحالية]:\n{context if context else default_prompt}"
+        return default_prompt
 
     # ==================== The 7 Rounds ====================
 
@@ -501,15 +512,19 @@ class StrategyFactory:
             for b in market_data.get('market_breadth', [])[:10]
         ])
         prompts = {
-            "chartist": (
+            "chartist": self._get_prompt(
+                "chartist",
                 f"أنت الشارتيست الكمي لـ {symbol}. حلل إحصاءات الـ 7 سنوات والـ 3 سنوات (Walk-Forward) "
                 f"بشكل منفصل تماماً. استخرج الحقائق الجافة فقط عن السلوك السعري في الفترتين. "
-                f"Discovery: {quant['discovery_stats']}."
+                f"Discovery: {quant['discovery_stats']}.",
+                f"رمز العملة: {symbol}. إحصاءات الاستكشاف: {quant['discovery_stats']}"
             ),
-            "reporter": (
+            "reporter": self._get_prompt(
+                "reporter",
                 f"أنت 'المذيع صقر'. حلل مشاعر المتداولين لـ {symbol} عبر منصة X. "
                 f"نظرة عامة على السوق (القائمة البيضاء): {breadth_summary}. "
-                f"هل يوجد فومو (FOMO) أو فاد (FUD)؟"
+                f"هل يوجد فومو (FOMO) أو فاد (FUD)؟",
+                f"رمز العملة: {symbol}. ملخص القائمة البيضاء: {breadth_summary}"
             )
         }
         return await self._call_batch(prompts)
@@ -622,4 +637,5 @@ class StrategyFactory:
     }}
   ]
 }}"""
-        return await self._call_batch({"prince": prince_prompt})
+        final_prince_prompt = self._get_prompt("prince", prince_prompt, f"مخرجات مراجعة الجولة 6:\n{json.dumps(r6, ensure_ascii=False)}")
+        return await self._call_batch({"prince": final_prince_prompt})

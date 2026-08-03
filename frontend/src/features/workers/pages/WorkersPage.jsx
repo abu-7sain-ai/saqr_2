@@ -33,6 +33,20 @@ const WorkersPage = () => {
   const [activeWorkerForWithdraw, setActiveWorkerForWithdraw] = React.useState(null)
   const [activeWorkerForClone, setActiveWorkerForClone] = React.useState(null)
   const [selectedWorker, setSelectedWorker] = React.useState(null)
+  const [workerTradesData, setWorkerTradesData] = React.useState(null)
+  const [loadingTrades, setLoadingTrades] = React.useState(false)
+
+  useEffect(() => {
+    if (selectedWorker?.id) {
+      setLoadingTrades(true)
+      workerService.getWorkerTrades(selectedWorker.id)
+        .then(data => setWorkerTradesData(data))
+        .catch(err => console.error(err))
+        .finally(() => setLoadingTrades(false))
+    } else {
+      setWorkerTradesData(null)
+    }
+  }, [selectedWorker])
 
   const handleWithdrawConfirm = async (workerId, amount, mode) => {
     try {
@@ -345,6 +359,107 @@ const WorkersPage = () => {
                           )
                         })()}
                       </div>
+                    </div>
+                  </div>
+
+                  {/* ── سجل وحركة الصفقات التفصيلي ── */}
+                  <div className="col-12">
+                    <div className="glass-card p-3" style={{ border: '1px solid rgba(212,175,55,0.2)' }}>
+                      <div className="d-flex justify-content-between align-items-center mb-3">
+                        <div className="small fw-bold" style={{ color: '#d4af37' }}>
+                          📊 سجل وإحصائيات تداول الموظف
+                        </div>
+                        {workerTradesData?.summary && (
+                          <span className="badge bg-warning text-dark fw-bold">
+                            نسبة النجاح: {workerTradesData.summary.win_rate}%
+                          </span>
+                        )}
+                      </div>
+
+                      {loadingTrades ? (
+                        <div className="text-center py-4">
+                          <div className="spinner-border spinner-border-sm text-warning me-2"></div>
+                          <span className="small text-secondary">جاري تحميل سجل الصفقات...</span>
+                        </div>
+                      ) : workerTradesData ? (
+                        <>
+                          {/* Summary Stats Cards */}
+                          <div className="row g-2 mb-3">
+                            <div className="col-3">
+                              <div className="p-2 rounded bg-dark text-center border border-secondary border-opacity-25">
+                                <div className="extra-small text-secondary">إجمالي الصفقات</div>
+                                <div className="fw-bold text-white fs-6">{workerTradesData.summary.total_trades}</div>
+                              </div>
+                            </div>
+                            <div className="col-3">
+                              <div className="p-2 rounded bg-dark text-center border border-secondary border-opacity-25">
+                                <div className="extra-small text-secondary">الربح / الخسارة</div>
+                                <div className="fw-bold text-success fs-6">
+                                  {workerTradesData.summary.winning_trades} <span className="text-secondary">/</span> <span className="text-danger">{workerTradesData.summary.losing_trades}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="col-3">
+                              <div className="p-2 rounded bg-dark text-center border border-secondary border-opacity-25">
+                                <div className="extra-small text-secondary">صافي النتيجة</div>
+                                <div className={`fw-bold fs-6 ${workerTradesData.summary.net_pnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                                  {workerTradesData.summary.net_pnl >= 0 ? '+' : ''}${workerTradesData.summary.net_pnl}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="col-3">
+                              <div className="p-2 rounded bg-dark text-center border border-secondary border-opacity-25">
+                                <div className="extra-small text-secondary">العملات المتداولة</div>
+                                <div className="fw-bold text-warning fs-6 text-truncate" title={workerTradesData.summary.traded_symbols?.join(', ') || '-'}>
+                                  {workerTradesData.summary.traded_symbols?.length || 0} عملة
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Trades Table */}
+                          {workerTradesData.trades && workerTradesData.trades.length > 0 ? (
+                            <div className="table-responsive" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                              <table className="table table-dark table-hover table-sm align-middle extra-small mb-0">
+                                <thead>
+                                  <tr className="text-secondary border-secondary">
+                                    <th>الرمز</th>
+                                    <th>الدخول</th>
+                                    <th>الخروج</th>
+                                    <th>النتيجة ($)</th>
+                                    <th>سبب الخروج</th>
+                                    <th>التاريخ</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {workerTradesData.trades.map((trade) => {
+                                    const pnl = parseFloat(trade.result || 0)
+                                    const isExit = Boolean(trade.exit_at)
+                                    return (
+                                      <tr key={trade.id}>
+                                        <td className="fw-bold text-warning">{trade.pair}</td>
+                                        <td>${parseFloat(trade.entry_price || 0).toFixed(4)}</td>
+                                        <td>{trade.exit_price ? `$${parseFloat(trade.exit_price).toFixed(4)}` : <span className="badge bg-primary">مفتوحة</span>}</td>
+                                        <td className={`fw-bold ${!isExit ? 'text-secondary' : pnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                                          {!isExit ? '-' : `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`}
+                                        </td>
+                                        <td className="text-secondary">{trade.exit_type || (isExit ? 'مغلقة' : 'نشطة')}</td>
+                                        <td className="text-secondary">{new Date(trade.entry_at).toLocaleDateString('ar-EG')}</td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <div className="text-center py-3 text-secondary extra-small">
+                              لم يقم هذا الموظف بتنفيذ أي صفقات بعد
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-center py-3 text-secondary extra-small">تعذر جلب صفقات الموظف</div>
+                      )}
                     </div>
                   </div>
                 </div>

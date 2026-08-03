@@ -129,8 +129,8 @@ const WorkerCard = ({
           <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
             الزوج
           </div>
-          <div className="fw-black text-gold fs-6">
-            {worker.user_settings?.symbol || worker.strategy_name || worker.pair || 'BTC/USDT'}
+          <div className="fw-black text-gold fs-6 text-truncate" title={worker.user_settings?.symbol === 'ALL' ? 'الكل (القائمة البيضاء)' : (worker.user_settings?.symbol || worker.strategy_name || worker.pair || 'BTC/USDT')}>
+            {worker.user_settings?.symbol === 'ALL' ? 'الكل (القائمة البيضاء)' : (worker.user_settings?.symbol || worker.strategy_name || worker.pair || 'BTC/USDT')}
           </div>
         </div>
         <div className="col-4 text-end">
