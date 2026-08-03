@@ -360,11 +360,28 @@ class WorkerExecutor:
             else:
                 self.logger.info(f"✅ [Paper Mode] Mock exit executed locally for {position['pair']} at {exit_price}")
 
+            # Map internal exit reasons to valid DB exit_type values for trades_exit_type_check constraint
+            exit_type_map = {
+                "hard_sl": "stop_loss",
+                "sl": "stop_loss",
+                "stop_loss": "stop_loss",
+                "hard_tp": "target",
+                "tp": "target",
+                "target": "target",
+                "strategy_signal": "target",
+                "manual": "manual",
+                "expired": "expired"
+            }
+            db_exit_type = exit_type_map.get(reason, "stop_loss" if "sl" in str(reason).lower() else ("target" if "tp" in str(reason).lower() else "manual"))
+
             # 2. Update DB
-            supabase = get_supabase_client()
+            supabase = get_supabase_admin_client()
             supabase.table('trades').update({
-                "exit_price": exit_price, "exit_at": datetime.now().isoformat(),
-                "result": pnl, "exit_type": reason
+                "exit_price": exit_price,
+                "exit_at": datetime.now().isoformat(),
+                "result": pnl,
+                "exit_type": db_exit_type,
+                "exit_reason": reason
             }).eq('id', position['id']).execute()
 
             # Update Capital & Handle Liquidation (Sweeping)
