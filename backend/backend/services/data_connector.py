@@ -116,13 +116,11 @@ class DataConnector:
                 .eq('timeframe', timeframe)
                 .gte('timestamp', start.isoformat())
                 .lte('timestamp', now.isoformat())
+                .limit(1)
                 .execute()
             )
 
-            available = getattr(resp, 'count', None)
-            if available is None:
-                available = len(resp.data or [])
-
+            available = getattr(resp, 'count', 0) or 0
             oldest_ts = resp.data[0].get('timestamp') if resp.data else None
             newest_ts = resp.data[-1].get('timestamp') if resp.data else None
             coverage = (available / expected) if expected > 0 else 0.0

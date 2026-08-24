@@ -430,11 +430,11 @@ const WorkersPage = () => {
                                 <thead>
                                   <tr className="text-secondary border-secondary">
                                     <th>الرمز</th>
-                                    <th>الدخول</th>
-                                    <th>الخروج</th>
+                                    <th>سعر الدخول</th>
+                                    <th>سعر الخروج</th>
                                     <th>النتيجة ($)</th>
-                                    <th>سبب الخروج</th>
-                                    <th>التاريخ</th>
+                                    <th>حالة / سبب الخروج</th>
+                                    <th>تاريخ الدخول</th>
                                   </tr>
                                 </thead>
                                 <tbody>

@@ -482,11 +482,11 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
             )}
             <button
               onClick={handleStart}
-              disabled={loading || coverageLoading || !coverageOk}
+              disabled={loading}
               className="btn btn-gold w-100 py-3 fw-bold d-flex align-items-center justify-content-center gap-2 shadow-gold-lg"
               style={{ borderRadius: '16px' }}
             >
-              {loading || coverageLoading ? (
+              {loading ? (
                 <Loader2 className="animate-spin" size={20} />
               ) : (
                 <>

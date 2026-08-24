@@ -14,69 +14,101 @@ import {
   FileCheck
 } from 'lucide-react'
 
-const experts = [
+import { useSettingStore } from '../../settings/store/useSettingStore'
+
+const MODEL_LABELS = {
+  'groq/compound': 'Groq Compound',
+  'google/gemini-2.5-flash': 'Gemini 2.5 Flash',
+  'anthropic/claude-sonnet-4': 'Claude Sonnet 4',
+  'openai/gpt-4.1-mini': 'GPT-4.1 Mini',
+  'meta-llama/llama-4-scout': 'Llama 4 Scout',
+  'deepseek/deepseek-chat-v3-0324': 'DeepSeek V3',
+  'qwen/qwen3-32b': 'Qwen 3 (32B)',
+  'mistralai/mistral-medium-3': 'Mistral Medium 3',
+  'llama-3.3-70b-versatile': 'Groq Llama 3.3',
+}
+
+const DEFAULT_EXPERTS_LIST = [
   {
     id: 'chartist',
-    name: 'الشارتيست',
-    model: 'DeepSeek-V3 (Real-Time)',
+    name: 'الشارتيست الكمي',
     icon: <Microscope size={20} />,
     color: 'text-info'
   },
   {
     id: 'reporter',
-    name: 'المذيع',
-    model: 'Grok-2 (Real-Time X)',
+    name: 'المذيع صقر',
     icon: <MessageSquare size={20} />,
     color: 'text-warning'
   },
   {
     id: 'pulser',
     name: 'النبّاض',
-    model: 'Grok-2 (Real-Time X)',
     icon: <Zap size={20} />,
     color: 'text-danger'
   },
   {
     id: 'radar',
     name: 'الرادار',
-    model: 'DeepSeek-V3 (Real-Time)',
     icon: <Users size={20} />,
     color: 'text-primary'
   },
   {
     id: 'guardian',
-    name: 'الحارس',
-    model: 'DeepSeek-V3 (Real-Time)',
+    name: 'الحارس الصارم',
     icon: <Shield size={20} />,
     color: 'text-danger'
   },
   {
     id: 'investigator',
     name: 'المحقق',
-    model: 'Claude 3.5 Sonnet (Expert)',
     icon: <FileCheck size={20} />,
     color: 'text-success'
   },
   {
+    id: 'engineer',
+    name: 'المهندس الكمي',
+    icon: <Cpu size={20} />,
+    color: 'text-silver'
+  },
+  {
     id: 'prince',
-    name: 'العادي',
-    model: 'Claude 3.5 Sonnet (Expert)',
+    name: 'الأمير (صانع القرار)',
     icon: <Crown size={20} />,
     color: 'text-gold'
   },
   {
-    id: 'engineer',
-    name: 'المهندس',
-    model: 'Claude 3.5 Sonnet (Expert)',
+    id: 'advanced',
+    name: 'الملك / العقل المطور',
     icon: <Cpu size={20} />,
-    color: 'text-silver'
+    color: 'text-purple'
   }
 ]
 
 const MeetingSimulation = ({ session, onDelete }) => {
+  const { expertModelsForm, customExpertsForm } = useSettingStore()
   const opinions = session?.expert_opinions || {}
   const status = session?.status || opinions.status || 'pending'
   const symbol = session?.symbol || opinions.symbol || '???'
+
+  const allExperts = [
+    ...DEFAULT_EXPERTS_LIST,
+    ...customExpertsForm.map(ce => ({
+      id: ce.id,
+      name: ce.name,
+      icon: <Cpu size={20} />,
+      color: 'text-gold'
+    }))
+  ]
+
+  const experts = allExperts.map(exp => {
+    const rawModel = expertModelsForm[exp.id] || 'google/gemini-2.5-flash'
+    const label = MODEL_LABELS[rawModel] || rawModel.split('/').pop()
+    return {
+      ...exp,
+      model: label
+    }
+  })
 
   if (!session || status === 'completed') return null
 

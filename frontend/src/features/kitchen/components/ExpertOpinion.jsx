@@ -12,49 +12,49 @@ import {
 } from 'lucide-react'
 const expertInfo = {
   chartist: {
-    name: 'الشاريتست (DeepSeek)',
+    name: 'الشارتيست الكمي',
     icon: <BarChart2 size={18} className="text-gold" />,
     description: 'خبير التحليل الفني وقراءة الشموع'
   },
   reporter: {
-    name: 'المذيع (Grok)',
+    name: 'المذيع صقر',
     icon: <Mic2 size={18} className="text-info" />,
     description: 'محلل الأخبار والمشاعر العامة'
   },
   pulser: {
-    name: 'النبّاض (Grok)',
+    name: 'النبّاض',
     icon: <Activity size={18} className="text-warning" />,
     description: 'مراقب زخم السوق والتدفقات'
   },
   radar: {
-    name: 'الرادار (DeepSeek)',
+    name: 'الرادار',
     icon: <Radar size={18} className="text-emerald" />,
     description: 'صائد الفرص والاختراقات'
   },
   guardian: {
-    name: 'الحارس (DeepSeek)',
+    name: 'الحارس الصارم',
     icon: <ShieldAlert size={18} className="text-ruby" />,
     description: 'صمام الأمان ومنع المخاطر'
   },
   investigator: {
-    name: 'المحقق (Claude)',
+    name: 'المحقق',
     icon: <Search size={18} className="text-silver" />,
     description: 'مدقق البيانات والبحث المتعمق'
   },
   prince: {
-    name: 'العادي (Claude)',
+    name: 'الأمير (صانع القرار القياسي)',
     icon: <Crown size={18} className="text-gold" />,
     description: 'متخذ القرار النهائي (Standard)'
   },
-  king: {
-    name: 'المطور (LSTM)',
+  advanced: {
+    name: 'الملك / العقل المطور',
     icon: <Cpu size={18} className="text-purple" />,
-    description: 'النموذج المتقدم للتنبؤ (Advanced)'
+    description: 'النموذج المتقدم للتعلم والتطوير (Advanced)'
   },
   engineer: {
-    name: 'المهندس (Claude)',
+    name: 'المهندس الكمي',
     icon: <Settings size={18} className="text-silver" />,
-    description: 'محول الاستراتيجية لكود قابل للاختبار'
+    description: 'محول الاستراتيجية ومستويات الأمان'
   }
 }
 

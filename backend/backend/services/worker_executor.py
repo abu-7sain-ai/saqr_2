@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from ..strategies.prince_stable import PrinceStableStrategy
 from ..strategies.dynamic_strategy import DynamicStrategy
-from ..config import get_supabase_admin_client as get_supabase_client
+from ..config import get_supabase_client, get_supabase_admin_client
 from .exchange_service import get_market_instance
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ class WorkerExecutor:
             return
         
         try:
-            supabase = get_supabase_client()
+            supabase = get_supabase_admin_client()
             
             # 2. Check Global Market Environment (Soft Stop Guard)
             market_state_resp = supabase.table('market_state').select('current_type').eq('id', 1).execute()
@@ -140,11 +140,18 @@ class WorkerExecutor:
                 tradeable_symbols = symbols["tradeable"]
                 candidates = []
 
-                # استخدام Gemini للحصول على إشارة AI مباشرة بدلاً من البوابات التقنية
+                # ✅ تنويع المحفظة: جلب كل العملات المفتوحة للمستخدم عبر كافة الموظفين لمنع تكرار نفس الرمز
+                try:
+                    all_active_resp = supabase.table('trades').select('pair').eq('user_id', self.worker['user_id']).is_('exit_at', 'null').execute()
+                    global_active_symbols = list(set([t['pair'] for t in (all_active_resp.data or []) if t.get('pair')]))
+                except Exception as ex:
+                    self.logger.warning(f"Could not check global active trades: {ex}")
+                    global_active_symbols = list(active_trades.keys())
+
+                # استخدام Groq للحصول على إشارة AI مباشرة وموزعة
                 from backend.services.gemini_signal import fetch_gemini_signal
-                # ✅ نمرر قائمة العملات المعتمدة ونوع السوق للـ Gemini Signal Engine
                 signal = await fetch_gemini_signal(
-                    active_symbols=list(active_trades.keys()),
+                    active_symbols=global_active_symbols,
                     worker_settings=self.worker.get('user_settings', {}),
                     tradeable_symbols=tradeable_symbols,
                     market_type=self.market_type
@@ -255,7 +262,7 @@ class WorkerExecutor:
                 if news_risk == "high":
                     self.logger.warning(f"🚨 CRITICAL NEWS: High news risk for {symbol} on CryptoPanic. Pausing Sniper worker immediately.")
                     # Update status in DB to paused
-                    supabase = get_supabase_client()
+                    supabase = get_supabase_admin_client()
                     supabase.table('workers').update({"status": "paused"}).eq('id', self.worker_id).execute()
                     
                     # Notify via Telegram
@@ -309,7 +316,7 @@ class WorkerExecutor:
                 self.logger.info(f"✅ [Paper Mode] Mock order & SL placed locally for {symbol} at {price}")
 
             # 2. Record in DB
-            supabase = get_supabase_client()
+            supabase = get_supabase_admin_client()
             trade_data = {
                 "user_id": self.worker['user_id'],
                 "worker_id": self.worker_id,
@@ -464,14 +471,14 @@ class WorkerExecutor:
 
     def _db_update_capital(self, new_cap: float):
         try:
-            supabase = get_supabase_client()
+            supabase = get_supabase_admin_client()
             supabase.table('workers').update({"current_capital": new_cap}).eq('id', self.worker_id).execute()
         except Exception as e:
             self.logger.error(f"Capital update failed: {e}")
 
     async def _get_market_symbols(self) -> Dict[str, list]:
         try:
-            supabase = get_supabase_client()
+            supabase = get_supabase_admin_client()
             # جلب القائمة البيضاء
             whitelist = supabase.table('whitelist').select('symbol').eq('market_id', self.market_id).eq('is_active', True).execute()
             # جلب قائمة القياديين

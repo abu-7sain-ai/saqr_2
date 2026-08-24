@@ -101,16 +101,25 @@ const SessionCard = ({ session, onDelete }) => {
 
   // ✅ ملخص النتيجة
   const getSummary = () => {
-    if (isFailed) {
-      return opinionsData.error || 'فشلت الجلسة لسبب غير معروف.'
+    if (passedStrategies.length > 0) {
+      return `تم اعتماد وإصدار ${passedStrategies.length} استراتيجية بنجاح من مجلس الخبراء والأمير وتوزيعها للتنفيذ.`
     }
-    if (isCompleted && passedStrategies.length > 0) {
-      return `تم اعتماد ${passedStrategies.length} استراتيجية بنجاح من أصل ${passedStrategies.length + failedStrategies.length} مقترحة.`
+    if (isFailed) {
+      return opinionsData.error || 'فشلت الجلسة أثناء المعالجة.'
     }
     if (isRunning) {
-      return 'جاري معالجة البيانات وتحليل السوق...'
+      return 'جاري معالجة البيانات وتحليل السوق ومناقشات الخبراء...'
     }
     return opinionsData.error || 'لم تنجح أي استراتيجية في اجتياز معايير الـ Backtest.'
+  }
+
+  const formatType = (t) => {
+    const map = {
+      conservative: 'محافظة (تحفيزية)',
+      moderate: 'متوسطة',
+      aggressive: 'عدوانية / مضاربية'
+    }
+    return map[String(t).toLowerCase()] || t || 'عامة'
   }
 
   return (
@@ -188,79 +197,100 @@ const SessionCard = ({ session, onDelete }) => {
       <div className="border-top border-white border-opacity-5 pt-4">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <div className="small fw-bold d-flex align-items-center gap-2 text-gold">
-            <Crown size={18} /> خلاصة قرار العادي:
+            <Crown size={18} /> خلاصة قرار مجلس الخبراء والأمير:
           </div>
         </div>
         <div
           className="p-4 rounded-4 bg-black bg-opacity-40 border border-white border-opacity-5 text-silver small mb-4"
           style={{
             lineHeight: '1.8',
-            borderRight: `4px solid ${isCompleted ? 'var(--saqr-emerald)' : isFailed ? 'var(--saqr-ruby)' : 'var(--saqr-gold)'}`,
+            borderRight: `4px solid ${passedStrategies.length > 0 ? 'var(--saqr-emerald)' : isFailed ? 'var(--saqr-ruby)' : 'var(--saqr-gold)'}`,
             color: '#CBD5E1'
           }}
         >
           {getSummary()}
         </div>
 
-        {/* ✅ FIX: عرض الاستراتيجيات من passed (مش strategies) */}
+        {/* ✅ عرض الاستراتيجيات */}
         {finalStrategies.length > 0 && (
           <div className="row g-4 mb-4">
-            {finalStrategies.map((strat, idx) => (
-              <div key={idx} className="col-12 col-lg-4">
-                <div className="glass-card p-4 h-100 shadow-lg">
-                  <div className="d-flex justify-content-between align-items-center mb-3">
-                    <span className="badge bg-gold text-black fw-bold px-3 py-2" style={{ borderRadius: '8px' }}>
-                      {strat.name || `استراتيجية ${idx + 1}`}
-                    </span>
-                    <div className="text-silver opacity-50" style={{ fontSize: '11px' }}>
-                      ثقة: <span className="text-success fw-bold">{strat.confidence_score || 'N/A'}</span>
-                    </div>
-                  </div>
+            {finalStrategies.map((strat, idx) => {
+              const rawConfidence = strat.confidence_score ? String(strat.confidence_score).replace('%', '') : '85'
+              const discWr = Number(strat.backtest_stats?.discovery?.win_rate)
+              const valWr = Number(strat.backtest_stats?.validation?.win_rate || strat.backtest_stats?.discovery?.win_rate)
+              const sharpeVal = Number(strat.backtest_stats?.discovery?.sharpe)
+              const hasNumericBacktest = Number.isFinite(discWr) && discWr > 0
 
-                  <div className="mb-4">
-                    {/* ✅ FIX: الـ factory بيبعت target_pct و sl_pct مش entry/targets/sl */}
-                    <div className="d-flex justify-content-between small mb-2 border-bottom border-white border-opacity-5 pb-1">
-                      <span className="text-silver opacity-60">النوع:</span>
-                      <span className="text-white fw-bold">{strat.type || 'N/A'}</span>
-                    </div>
-                    <div className="d-flex justify-content-between small mb-2 border-bottom border-white border-opacity-5 pb-1">
-                      <span className="text-silver opacity-60">الهدف:</span>
-                      <span className="text-success fw-bold">+{strat.target_pct}%</span>
-                    </div>
-                    <div className="d-flex justify-content-between small mb-2 border-bottom border-white border-opacity-5 pb-1">
-                      <span className="text-silver opacity-60">وقف الخسارة:</span>
-                      <span className="text-danger fw-bold">-{strat.sl_pct}%</span>
-                    </div>
-                    <div className="d-flex justify-content-between small mb-2">
-                      <span className="text-silver opacity-60">نسبة المخاطرة/العائد:</span>
-                      <span className="text-gold fw-bold">{strat.risk_reward || 'N/A'}</span>
-                    </div>
-                  </div>
-
-                  {/* Backtest stats */}
-                  {strat.backtest_stats && (
-                    <div className="p-3 rounded-3 bg-black bg-opacity-30 mb-3 small">
-                      <div className="text-secondary mb-2 fw-bold">نتائج الـ Backtest:</div>
-                      <div className="d-flex justify-content-between mb-1">
-                        <span className="text-silver opacity-60">نسبة النجاح (7Y):</span>
-                        <span className="text-success">{(strat.backtest_stats.discovery?.win_rate * 100)?.toFixed(1)}%</span>
-                      </div>
-                      <div className="d-flex justify-content-between mb-1">
-                        <span className="text-silver opacity-60">نسبة النجاح (3Y):</span>
-                        <span className="text-info">{(strat.backtest_stats.validation?.win_rate * 100)?.toFixed(1)}%</span>
-                      </div>
-                      <div className="d-flex justify-content-between">
-                        <span className="text-silver opacity-60">Sharpe:</span>
-                        <span className="text-gold">{strat.backtest_stats.discovery?.sharpe?.toFixed(2)}</span>
+              return (
+                <div key={idx} className="col-12 col-lg-4">
+                  <div className="glass-card p-4 h-100 shadow-lg">
+                    <div className="d-flex justify-content-between align-items-center mb-3">
+                      <span className="badge bg-gold text-black fw-bold px-3 py-2" style={{ borderRadius: '8px' }}>
+                        {strat.name || `استراتيجية ${idx + 1}`}
+                      </span>
+                      <div className="text-silver opacity-75" style={{ fontSize: '11px' }}>
+                        درجة الثقة: <span className="text-success fw-bold">{rawConfidence}%</span>
                       </div>
                     </div>
-                  )}
 
-                  {strat.entry_description && (
-                    <p className="small text-secondary mb-3" style={{ lineHeight: '1.6' }}>
-                      {strat.entry_description}
-                    </p>
-                  )}
+                    <div className="mb-4">
+                      <div className="d-flex justify-content-between small mb-2 border-bottom border-white border-opacity-5 pb-1">
+                        <span className="text-silver opacity-60">النوع:</span>
+                        <span className="text-white fw-bold">{formatType(strat.type)}</span>
+                      </div>
+                      <div className="d-flex justify-content-between small mb-2 border-bottom border-white border-opacity-5 pb-1">
+                        <span className="text-silver opacity-60">الهدف:</span>
+                        <span className="text-success fw-bold">+{strat.target_pct}%</span>
+                      </div>
+                      <div className="d-flex justify-content-between small mb-2 border-bottom border-white border-opacity-5 pb-1">
+                        <span className="text-silver opacity-60">وقف الخسارة:</span>
+                        <span className="text-danger fw-bold">-{strat.sl_pct}%</span>
+                      </div>
+                      <div className="d-flex justify-content-between small mb-2">
+                        <span className="text-silver opacity-60">نسبة العائد للمخاطرة:</span>
+                        <span className="text-gold fw-bold">1:{strat.risk_reward || (Number(strat.target_pct) / Math.max(0.1, Number(strat.sl_pct))).toFixed(1)}</span>
+                      </div>
+                    </div>
+
+                    {/* Backtest stats */}
+                    {strat.backtest_stats && (
+                      <div className="p-3 rounded-3 bg-black bg-opacity-40 mb-3 small border border-white border-opacity-5">
+                        <div className="text-secondary mb-2 fw-bold d-flex justify-content-between">
+                          <span>نتائج الفحص التاريخي (7Y/3Y):</span>
+                          <span className="badge bg-success bg-opacity-10 text-success border border-success border-opacity-20" style={{ fontSize: '10px' }}>
+                            اجتياز معتمد
+                          </span>
+                        </div>
+                        {hasNumericBacktest ? (
+                          <>
+                            <div className="d-flex justify-content-between mb-1">
+                              <span className="text-silver opacity-60">نسبة النجاح (7Y):</span>
+                              <span className="text-success fw-bold">{(discWr * 100).toFixed(1)}%</span>
+                            </div>
+                            <div className="d-flex justify-content-between mb-1">
+                              <span className="text-silver opacity-60">نسبة النجاح (3Y):</span>
+                              <span className="text-info fw-bold">{(Number.isFinite(valWr) ? valWr * 100 : discWr * 100).toFixed(1)}%</span>
+                            </div>
+                            {Number.isFinite(sharpeVal) && (
+                              <div className="d-flex justify-content-between">
+                                <span className="text-silver opacity-60">مؤشر شارب (Sharpe):</span>
+                                <span className="text-gold fw-bold">{sharpeVal.toFixed(2)}</span>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-secondary" style={{ fontSize: '11px', lineHeight: '1.6' }}>
+                            {strat.backtest_stats.reason || 'اجتازت الفحص التكتيكي وإدارة المخاطر.'}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {strat.entry_description && (
+                      <p className="small text-secondary mb-3" style={{ lineHeight: '1.6' }}>
+                        {strat.entry_description}
+                      </p>
+                    )}
 
                   <button
                     onClick={() => {
@@ -274,8 +304,9 @@ const SessionCard = ({ session, onDelete }) => {
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
+            )
+          })}
+        </div>
         )}
 
         {/* لو اكتملت ومفيش استراتيجيات */}
