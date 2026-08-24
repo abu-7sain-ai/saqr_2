@@ -159,12 +159,15 @@ const SessionCard = ({ session, onDelete }) => {
         }
       }
 
-      // Container for PDF generation
+      // Container for PDF generation (must be in viewport coordinate space with zIndex -9999 so html2canvas renders it)
       const container = document.createElement('div')
       container.style.position = 'fixed'
-      container.style.left = '-9999px'
       container.style.top = '0'
+      container.style.left = '0'
       container.style.width = '790px'
+      container.style.zIndex = '-9999'
+      container.style.opacity = '1'
+      container.style.pointerEvents = 'none'
       container.style.padding = '25px'
       container.style.background = '#ffffff'
       container.style.color = '#0f172a'
@@ -181,12 +184,12 @@ const SessionCard = ({ session, onDelete }) => {
               جلسة رقم #${session.id.slice(0, 8)} | العملة: ${session.symbol} | التاريخ: ${formatDate(session.created_at)}
             </div>
           </div>
-          <div style="background: #f8fafc; border: 1px solid #cbd5e1; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: bold;">
+          <div style="background: #f8fafc; border: 1px solid #cbd5e1; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: bold; color: #0f172a;">
             ${session.market_type === 'stable' ? 'سوق مستقر' : 'سوق متوتر'}
           </div>
         </div>
 
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-right: 4px solid #d4af37; padding: 14px; border-radius: 6px; margin-bottom: 20px; font-size: 12.5px;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-right: 4px solid #d4af37; padding: 14px; border-radius: 6px; margin-bottom: 20px; font-size: 12.5px; color: #0f172a;">
           <strong style="color: #b45309;">📜 خلاصة قرار المجلس والأمير:</strong><br />
           ${getSummary()}
         </div>
@@ -196,25 +199,25 @@ const SessionCard = ({ session, onDelete }) => {
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
           ${finalStrategies.map((s, idx) => `
-            <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; background: #ffffff;">
+            <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; background: #ffffff; color: #0f172a;">
               <div style="font-weight: bold; font-size: 13px; color: #0f172a; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;">
                 ${s.name || `استراتيجية ${idx + 1}`} (درجة الثقة: ${s.confidence_score ? String(s.confidence_score).replace('%', '') : '85'}%)
               </div>
               <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
-                <span>النوع:</span><strong>${formatType(s.type)}</strong>
+                <span style="color: #64748b;">النوع:</span><strong style="color: #0f172a;">${formatType(s.type)}</strong>
               </div>
               <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
-                <span>الهدف (TP):</span><strong style="color: #16a34a;">+${s.target_pct}%</strong>
+                <span style="color: #64748b;">الهدف (TP):</span><strong style="color: #16a34a;">+${s.target_pct}%</strong>
               </div>
               <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
-                <span>وقف الخسارة (SL):</span><strong style="color: #dc2626;">-${s.sl_pct}%</strong>
+                <span style="color: #64748b;">وقف الخسارة (SL):</span><strong style="color: #dc2626;">-${s.sl_pct}%</strong>
               </div>
               <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
-                <span>نسبة العائد للمخاطرة:</span><strong>1:${s.risk_reward || (Number(s.target_pct) / Math.max(0.1, Number(s.sl_pct))).toFixed(1)}</strong>
+                <span style="color: #64748b;">نسبة العائد للمخاطرة:</span><strong style="color: #b45309;">1:${s.risk_reward || (Number(s.target_pct) / Math.max(0.1, Number(s.sl_pct))).toFixed(1)}</strong>
               </div>
               ${s.entry_description ? `
                 <div style="font-size: 10.5px; color: #475569; margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e2e8f0; line-height: 1.5;">
-                  <strong>الوصف الفني وقواعد الدخول:</strong><br />${s.entry_description}
+                  <strong style="color: #0f172a;">الوصف الفني وقواعد الدخول:</strong><br />${s.entry_description}
                 </div>
               ` : ''}
             </div>
@@ -225,7 +228,7 @@ const SessionCard = ({ session, onDelete }) => {
           💬 محضر المداولات الكامل والحوار بين الخبراء الـ 8:
         </div>
         ${allDialogue.length > 0 ? allDialogue.map(d => `
-          <div style="margin-bottom: 12px; padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0; page-break-inside: avoid;">
+          <div style="margin-bottom: 12px; padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0; page-break-inside: avoid; color: #0f172a;">
             <div style="font-weight: bold; color: #b45309; font-size: 12px; margin-bottom: 4px;">👤 ${d.name}</div>
             <div style="font-size: 11.5px; color: #334155; white-space: pre-wrap; line-height: 1.7;">${d.text}</div>
           </div>
@@ -238,11 +241,21 @@ const SessionCard = ({ session, onDelete }) => {
 
       document.body.appendChild(container)
 
+      // Wait 150ms for styles and layout calculation
+      await new Promise(resolve => setTimeout(resolve, 150))
+
       const opt = {
         margin: [10, 10, 10, 10],
         filename: `تقرير_اجتماع_الخبراء_${session.symbol.replace(/[\/\\]/g, '_')}_${session.id.slice(0, 6)}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          letterRendering: true,
+          scrollY: 0,
+          scrollX: 0,
+          windowWidth: 790
+        },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       }
 
