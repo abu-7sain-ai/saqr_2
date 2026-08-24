@@ -319,19 +319,26 @@ const SessionCard = ({ session, onDelete }) => {
           <button
             onClick={handleExportPDF}
             disabled={isPdfGenerating}
-            className="btn btn-dark border border-gold border-opacity-30 p-2 px-3 rounded-3 d-flex align-items-center gap-2 text-gold shadow-sm"
-            style={{ background: 'rgba(212, 175, 55, 0.1)', cursor: isPdfGenerating ? 'wait' : 'pointer' }}
+            className="btn px-3 py-2 rounded-3 d-flex align-items-center gap-2 shadow-sm transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #d4af37 0%, #f59e0b 100%)',
+              color: '#000000',
+              fontWeight: '700',
+              fontSize: '12.5px',
+              border: 'none',
+              cursor: isPdfGenerating ? 'wait' : 'pointer'
+            }}
             title="تنزيل تقرير الجلسة والحوار كـ PDF مباشرة للجهاز"
           >
             {isPdfGenerating ? (
               <>
-                <Loader2 size={16} className="animate-spin" />
-                <span className="small fw-bold">جاري تحميل الـ PDF...</span>
+                <Loader2 size={16} className="animate-spin text-dark" />
+                <span className="text-black fw-bold">جاري تحميل الـ PDF...</span>
               </>
             ) : (
               <>
-                <FileDown size={16} />
-                <span className="small fw-bold">تحميل التقرير (PDF)</span>
+                <FileDown size={16} className="text-black" />
+                <span className="text-black fw-bold">تحميل التقرير (PDF)</span>
               </>
             )}
           </button>
@@ -344,7 +351,7 @@ const SessionCard = ({ session, onDelete }) => {
               }
             }}
             className="btn p-2 px-3 rounded-3 d-flex align-items-center gap-2"
-            style={{ background: 'rgba(220, 38, 38, 0.1)', color: 'var(--saqr-ruby)', border: 'none' }}
+            style={{ background: 'rgba(220, 38, 38, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)' }}
             title="حذف الجلسة"
           >
             <Trash2 size={16} />
@@ -382,13 +389,32 @@ const SessionCard = ({ session, onDelete }) => {
 
               return (
                 <div key={idx} className="col-12 col-lg-4">
-                  <div className="glass-card p-4 h-100 shadow-lg">
-                    <div className="d-flex justify-content-between align-items-center mb-3">
-                      <span className="badge bg-gold text-black fw-bold px-3 py-2" style={{ borderRadius: '8px' }}>
+                  <div className="glass-card p-4 h-100 shadow-lg" style={{ border: '1px solid rgba(212, 175, 55, 0.2)', background: 'rgba(15, 23, 42, 0.65)' }}>
+                    {/* Header: اسم الاستراتيجية ودرجة الثقة بألوان واضحة وفائقة التباين */}
+                    <div className="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom border-white border-opacity-10 gap-2 flex-wrap">
+                      <span
+                        className="fw-bold px-3 py-1 rounded-3"
+                        style={{
+                          background: 'linear-gradient(135deg, rgba(212, 175, 55, 0.25), rgba(245, 158, 11, 0.15))',
+                          color: '#facc15',
+                          border: '1px solid rgba(250, 204, 21, 0.4)',
+                          fontSize: '12.5px',
+                          letterSpacing: '0.2px'
+                        }}
+                      >
                         {strat.name || `استراتيجية ${idx + 1}`}
                       </span>
-                      <div className="text-silver opacity-75" style={{ fontSize: '11px' }}>
-                        درجة الثقة: <span className="text-success fw-bold">{rawConfidence}%</span>
+                      <div
+                        className="badge px-2 py-1 rounded-pill fw-bold d-flex align-items-center gap-1"
+                        style={{
+                          background: 'rgba(34, 197, 94, 0.18)',
+                          color: '#4ade80',
+                          border: '1px solid rgba(74, 222, 128, 0.35)',
+                          fontSize: '11px'
+                        }}
+                      >
+                        <span style={{ opacity: 0.85 }}>الثقة:</span>
+                        <span style={{ color: '#ffffff', fontWeight: '800' }}>{rawConfidence}%</span>
                       </div>
                     </div>
 
@@ -399,15 +425,15 @@ const SessionCard = ({ session, onDelete }) => {
                       </div>
                       <div className="d-flex justify-content-between small mb-2 border-bottom border-white border-opacity-5 pb-1">
                         <span className="text-silver opacity-60">الهدف:</span>
-                        <span className="text-success fw-bold">+{strat.target_pct}%</span>
+                        <span className="text-success fw-bold" style={{ color: '#4ade80' }}>+{strat.target_pct}%</span>
                       </div>
                       <div className="d-flex justify-content-between small mb-2 border-bottom border-white border-opacity-5 pb-1">
                         <span className="text-silver opacity-60">وقف الخسارة:</span>
-                        <span className="text-danger fw-bold">-{strat.sl_pct}%</span>
+                        <span className="text-danger fw-bold" style={{ color: '#f87171' }}>-{strat.sl_pct}%</span>
                       </div>
                       <div className="d-flex justify-content-between small mb-2">
                         <span className="text-silver opacity-60">نسبة العائد للمخاطرة:</span>
-                        <span className="text-gold fw-bold">1:{strat.risk_reward || (Number(strat.target_pct) / Math.max(0.1, Number(strat.sl_pct))).toFixed(1)}</span>
+                        <span className="text-gold fw-bold" style={{ color: '#facc15' }}>1:{strat.risk_reward || (Number(strat.target_pct) / Math.max(0.1, Number(strat.sl_pct))).toFixed(1)}</span>
                       </div>
                     </div>
 
