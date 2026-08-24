@@ -10,7 +10,9 @@ import {
   Crown,
   Trash2,
   CheckCircle2,
-  XCircle
+  XCircle,
+  FileDown,
+  FileText
 } from 'lucide-react'
 import ExpertOpinion from './ExpertOpinion'
 
@@ -122,6 +124,212 @@ const SessionCard = ({ session, onDelete }) => {
     return map[String(t).toLowerCase()] || t || 'عامة'
   }
 
+  // ✅ تنزيل تقرير الجلسة كـ PDF احترافي
+  const handleExportPDF = (e) => {
+    e.stopPropagation()
+    const printWindow = window.open('', '_blank', 'width=950,height=1000')
+    if (!printWindow) {
+      alert('يرجى السماح بالنوافذ المنبثقة لتحميل وطباعة ملف الـ PDF')
+      return
+    }
+
+    const expertRoundsList = [
+      { key: 'chartist',     name: '1. الشارتيست الكمي (تحليل السلوك السعري والشموع والمؤشرات)', round: '1_dissection' },
+      { key: 'reporter',     name: '2. المذيع صقر (تحليل المشاعر العامة والأخبار والزخم)',     round: '1_dissection' },
+      { key: 'pulser',       name: '3. النبّاض (استشعار النبضات وفرضيات الدخول الرقمية)',      round: '2_hypotheses' },
+      { key: 'radar',        name: '4. الرادار (مراقبة الثبات الإحصائي وتدفق السيولة)',       round: '2_hypotheses' },
+      { key: 'guardian',     name: '5. الحارس الصارم (هجوم الأمان واختبار صمود الأزمات)',     round: '3_adversarial' },
+      { key: 'investigator', name: '6. المحقق (التدقيق ومطابقة الفرضيات وكشف التناقضات)',    round: '3_adversarial' },
+      { key: 'engineer',     name: '7. المهندس الكمي (ضبط مستويات الوقف ونسب المخاطرة)',     round: '4_refinement' },
+      { key: 'prince',       name: '8. الأمير (صانع القرار القياسي واعتماد الاستراتيجيات)',   round: '7_standard_decree' },
+    ]
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+      <head>
+        <meta charset="utf-8" />
+        <title>تقرير اجتماع الخبراء العلمي - #${session.id.slice(0, 8)}</title>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
+          body {
+            font-family: 'Cairo', sans-serif;
+            background: #ffffff;
+            color: #0f172a;
+            padding: 35px;
+            margin: 0;
+            line-height: 1.7;
+          }
+          .header {
+            border-bottom: 2px solid #d4af37;
+            padding-bottom: 18px;
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          .logo {
+            font-size: 22px;
+            font-weight: 800;
+            color: #b45309;
+          }
+          .meta-info {
+            font-size: 12px;
+            color: #475569;
+            margin-top: 4px;
+          }
+          .badge {
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+          }
+          .decree-box {
+            background: #f8fafc;
+            border-right: 5px solid #d4af37;
+            padding: 18px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            font-size: 13.5px;
+            border: 1px solid #e2e8f0;
+            border-right: 5px solid #d4af37;
+          }
+          .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 8px;
+            margin: 30px 0 16px 0;
+          }
+          .strategies-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+          }
+          .strat-card {
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            padding: 16px;
+            background: #ffffff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+          }
+          .strat-card h4 {
+            margin: 0 0 12px 0;
+            font-size: 14.5px;
+            color: #0f172a;
+            border-bottom: 1px solid #f1f5f9;
+            padding-bottom: 6px;
+          }
+          .strat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12.5px;
+            margin-bottom: 7px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #f1f5f9;
+          }
+          .debate-item {
+            margin-bottom: 16px;
+            padding: 14px 18px;
+            background: #f8fafc;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            page-break-inside: avoid;
+          }
+          .expert-name {
+            font-weight: 700;
+            color: #b45309;
+            font-size: 13.5px;
+            margin-bottom: 6px;
+          }
+          .expert-text {
+            font-size: 12.5px;
+            color: #334155;
+            white-space: pre-wrap;
+            line-height: 1.8;
+          }
+          .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 15px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 11.5px;
+            color: #94a3b8;
+          }
+          @media print {
+            body { padding: 15px; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="logo">🦅 منصة صقر — محضر اجتماع الخبراء العلمي الرسمي</div>
+            <div class="meta-info">
+              جلسة رقم #${session.id.slice(0, 8)} | العملة: ${session.symbol} | التاريخ: ${formatDate(session.created_at)}
+            </div>
+          </div>
+          <div>
+            <span class="badge">${session.market_type === 'stable' ? 'سوق مستقر' : 'سوق متوتر'}</span>
+          </div>
+        </div>
+
+        <div class="decree-box">
+          <strong style="color: #b45309;">📜 خلاصة قرار المجلس والأمير:</strong><br />
+          ${getSummary()}
+        </div>
+
+        <div class="section-title">📊 الاستراتيجيات المعتمدة الصادرة عن المجلس (${finalStrategies.length} استراتيجية):</div>
+        <div class="strategies-grid">
+          ${finalStrategies.map((s, idx) => `
+            <div class="strat-card">
+              <h4>${s.name || `استراتيجية ${idx + 1}`} (درجة الثقة: ${s.confidence_score ? String(s.confidence_score).replace('%', '') : '85'}%)</h4>
+              <div class="strat-row"><span>نوع الاستراتيجية:</span><strong>${formatType(s.type)}</strong></div>
+              <div class="strat-row"><span>الهدف الربحي (TP):</span><strong style="color: #16a34a;">+${s.target_pct}%</strong></div>
+              <div class="strat-row"><span>وقف الخسارة الصارم (SL):</span><strong style="color: #dc2626;">-${s.sl_pct}%</strong></div>
+              <div class="strat-row"><span>نسبة العائد للمخاطرة:</span><strong>1:${s.risk_reward || (Number(s.target_pct) / Math.max(0.1, Number(s.sl_pct))).toFixed(1)}</strong></div>
+              ${s.entry_description ? `<div style="font-size: 11.5px; color: #475569; margin-top: 10px; line-height: 1.6;"><strong>نص الوصف الفني للدخول:</strong><br />${s.entry_description}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="section-title">💬 محضر المداولات الكامل والحوار بين الخبراء الـ 8:</div>
+        ${expertRoundsList.map(exp => {
+          const rData = rounds[exp.round] || {}
+          const op = rData[exp.key]
+          if (!op) return ''
+          const textContent = typeof op === 'object' ? JSON.stringify(op, null, 2) : String(op)
+          return `
+            <div class="debate-item">
+              <div class="expert-name">👤 ${exp.name}</div>
+              <div class="expert-text">${textContent}</div>
+            </div>
+          `
+        }).join('')}
+
+        <div class="footer">
+          تم إصدار هذا التقرير تلقائياً من محرك التداول الكمي والذكاء الاصطناعي — منصة صقر (SAQR)
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          }
+        </script>
+      </body>
+      </html>
+    `
+
+    printWindow.document.write(htmlContent)
+    printWindow.document.close()
+  }
+
   return (
     <div
       className="glass-panel p-4 mb-4 transition-all border-start border-4"
@@ -162,7 +370,7 @@ const SessionCard = ({ session, onDelete }) => {
           </div>
         </div>
 
-        <div className="d-flex gap-2 align-items-center">
+        <div className="d-flex gap-2 align-items-center flex-wrap">
           <div className="badge bg-dark bg-opacity-50 p-2 px-3 border border-gold border-opacity-10 rounded-3">
             <TrendingUp size={14} className="text-info me-1" />
             <span className="small text-silver">
@@ -178,6 +386,17 @@ const SessionCard = ({ session, onDelete }) => {
             </div>
           )}
 
+          {/* ✅ زر تنزيل التقرير كـ PDF */}
+          <button
+            onClick={handleExportPDF}
+            className="btn btn-dark border border-gold border-opacity-30 p-2 px-3 rounded-3 d-flex align-items-center gap-2 text-gold shadow-sm"
+            style={{ background: 'rgba(212, 175, 55, 0.1)', cursor: 'pointer' }}
+            title="تنزيل / طباعة تقرير الجلسة والحوار كـ PDF"
+          >
+            <FileDown size={16} />
+            <span className="small fw-bold">تحميل التقرير (PDF)</span>
+          </button>
+
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -187,6 +406,7 @@ const SessionCard = ({ session, onDelete }) => {
             }}
             className="btn p-2 px-3 rounded-3 d-flex align-items-center gap-2"
             style={{ background: 'rgba(220, 38, 38, 0.1)', color: 'var(--saqr-ruby)', border: 'none' }}
+            title="حذف الجلسة"
           >
             <Trash2 size={16} />
           </button>
@@ -287,9 +507,12 @@ const SessionCard = ({ session, onDelete }) => {
                     )}
 
                     {strat.entry_description && (
-                      <p className="small text-secondary mb-3" style={{ lineHeight: '1.6' }}>
-                        {strat.entry_description}
-                      </p>
+                      <div className="p-3 rounded-3 bg-black bg-opacity-40 border border-white border-opacity-5 mb-3 user-select-text">
+                        <div className="text-gold fw-bold extra-small mb-1">📝 الوصف الفني وقواعد الدخول:</div>
+                        <div className="text-silver small" style={{ fontSize: '11.5px', lineHeight: '1.7', color: '#cbd5e1' }}>
+                          {strat.entry_description}
+                        </div>
+                      </div>
                     )}
 
                   <button

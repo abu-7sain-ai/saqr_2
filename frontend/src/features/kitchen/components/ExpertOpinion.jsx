@@ -82,50 +82,56 @@ const ExpertOpinion = ({ expertKey, opinion }) => {
     description: 'خبير ذكاء اصطناعي'
   }
 
+  const formatOpinionText = (text) => {
+    if (!text) return '... في انتظار مشاركة الخبير ...'
+    if (typeof text === 'object') {
+      try {
+        return JSON.stringify(text, null, 2)
+      } catch (e) {
+        return String(text)
+      }
+    }
+    return String(text)
+  }
+
   return (
     <div
-      className="p-3 h-100 border-top border-1 border-gold border-opacity-10 shadow-sm"
-      style={{ background: 'rgba(0, 0, 0, 0.25)', borderRadius: '14px' }}
+      className="p-3 h-100 border border-1 border-gold border-opacity-15 shadow-sm"
+      style={{ background: 'rgba(0, 0, 0, 0.35)', borderRadius: '16px' }}
     >
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div className="d-flex align-items-center gap-2">
           <div
-            className="p-2 rounded-3 border border-gold border-opacity-5"
-            style={{ background: 'rgba(197, 160, 89, 0.05)' }}
+            className="p-2 rounded-3 border border-gold border-opacity-10"
+            style={{ background: 'rgba(212, 175, 55, 0.08)' }}
           >
-            {React.cloneElement(info.icon, { size: 16, className: 'opacity-75' })}
+            {React.cloneElement(info.icon, { size: 18, className: 'text-gold' })}
           </div>
           <div>
             <div
-              className="fw-bold text-silver small opacity-90"
-              style={{ letterSpacing: '0.3px', color: '#e2e8f0' }}
+              className="fw-bold text-white small"
+              style={{ fontSize: '13px', color: '#f8fafc' }}
             >
               {info.name}
             </div>
-            <div className="d-flex gap-1 mt-1">
-              {getBrainsForExpert(expertKey.toLowerCase()).map((b) => (
-                <span
-                  key={b}
-                  title={`${brainTypes[b].name}: ${brainTypes[b].desc}`}
-                  style={{ fontSize: '10px', cursor: 'help' }}
-                >
-                  {brainTypes[b].symbol}
-                </span>
-              ))}
+            <div className="extra-small text-secondary" style={{ fontSize: '11px' }}>
+              {info.description}
             </div>
           </div>
         </div>
       </div>
       <div
-        className="small text-secondary p-2 rounded-2 border border-gold border-opacity-5"
+        className="text-silver p-3 rounded-3 border border-white border-opacity-5 user-select-text"
         style={{
-          lineHeight: '1.8',
-          fontSize: '11.5px',
-          background: 'rgba(0,0,0,0.15)',
-          color: '#94a3b8'
+          lineHeight: '1.9',
+          fontSize: '12.5px',
+          background: 'rgba(0,0,0,0.25)',
+          color: '#cbd5e1',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word'
         }}
       >
-        {opinion}
+        {formatOpinionText(opinion)}
       </div>
     </div>
   )
