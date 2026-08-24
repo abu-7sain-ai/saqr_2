@@ -232,16 +232,25 @@ class Database:
             return []
 
     @staticmethod
-    def get_user_settings(user_id):
-        """Fetch user settings (e.g., is Advanced/Developed enabled)."""
-        if not user_id or str(user_id).lower() == 'none':
+    def get_user_settings(user_id=None):
+        """Fetch user settings (expert_models, expert_prompts, is_developed_enabled, etc.)."""
+        target_uid = user_id or os.environ.get("SUPER_OWNER_ID")
+        if not target_uid or str(target_uid).lower() == 'none':
+            try:
+                profile_resp = supabase.table('profiles').select('id, settings').limit(1).execute()
+                if profile_resp.data and profile_resp.data[0].get('settings'):
+                    return profile_resp.data[0]['settings']
+            except Exception:
+                pass
             return {'is_developed_enabled': True}
         try:
-            response = supabase.table('profiles').select('settings').eq('id', user_id).limit(1).execute()
-            return response.data[0]['settings'] if response.data else {}
+            response = supabase.table('profiles').select('settings').eq('id', target_uid).limit(1).execute()
+            if response.data and response.data[0].get('settings'):
+                return response.data[0]['settings']
+            return {'is_developed_enabled': True}
         except Exception as e:
             print(f"Error fetching user settings: {e}")
-            return {}
+            return {'is_developed_enabled': True}
 
     @staticmethod
     def get_workers_by_user(user_id):

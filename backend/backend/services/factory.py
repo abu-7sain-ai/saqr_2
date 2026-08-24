@@ -97,13 +97,14 @@ class StrategyFactory:
             self._current_plan = None
             self._user_profile = None
 
-        user_settings = self.db.get_user_settings(user_id) if user_id else {}
+        user_settings = self.db.get_user_settings(user_id)
         self._custom_prompts = user_settings.get('expert_prompts') or {}
         custom_models = user_settings.get('expert_models') or {}
         if custom_models:
             for k, v in custom_models.items():
                 if v:
                     self.experts[k] = v
+                    logger.info(f"🧠 Assigned setting model for expert '{k}': {v}")
 
         logger.info(f"🚀 Starting Scientific Council for Session {session_id}")
         await self._safe_notify(Notifier.notify_session_start(session_id, symbol))
