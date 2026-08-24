@@ -1,4 +1,4 @@
-import html2pdf from 'html2pdf.js'
+import React, { useState } from 'react'
 import {
   Calendar,
   TrendingUp,
@@ -245,6 +245,9 @@ const SessionCard = ({ session, onDelete }) => {
         html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       }
+
+      const html2pdfModule = await import('html2pdf.js')
+      const html2pdf = html2pdfModule.default || html2pdfModule
 
       await html2pdf().set(opt).from(container).save()
       document.body.removeChild(container)
