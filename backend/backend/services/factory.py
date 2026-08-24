@@ -365,8 +365,14 @@ class StrategyFactory:
             import traceback
             logger.error(f"[ERROR] Session {session_id} failed: {e}")
             logger.error(traceback.format_exc())
-            self.db.update_session_data(session_id, {"status": "failed", "expert_opinions": {"error": str(e)}})
-            await self._safe_notify(Notifier.notify_session_fail(session_id, str(e)))
+            try:
+                current_session = self.db.get_session(session_id)
+                has_passed = bool(current_session and current_session.get('final_decision', {}).get('passed'))
+            except Exception:
+                has_passed = False
+            if not has_passed:
+                self.db.update_session_data(session_id, {"status": "failed", "expert_opinions": {"error": str(e)}})
+                await self._safe_notify(Notifier.notify_session_fail(session_id, str(e)))
 
     async def _spawn_worker(self, session_id, user_id, market_id, symbol, strategy, user_ws, model_type, worker_index=0, total_workers=1):
         try:

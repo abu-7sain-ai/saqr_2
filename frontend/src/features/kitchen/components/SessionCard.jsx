@@ -39,7 +39,7 @@ const SessionCard = ({ session, onDelete }) => {
 
   const passedStrategies = session.final_decision?.passed || []
   const failedStrategies = session.final_decision?.failed || []
-  const finalStrategies = passedStrategies  // اللي عدت الـ backtest
+  const finalStrategies = passedStrategies.length > 0 ? passedStrategies : (session.final_decision?.strategies || [])
 
   const rounds = opinionsData.rounds || {}
 
@@ -53,7 +53,14 @@ const SessionCard = ({ session, onDelete }) => {
   if (rounds['6_audit']) Object.assign(currentOpinions, rounds['6_audit'])
   if (rounds['7_standard_decree']) Object.assign(currentOpinions, rounds['7_standard_decree'])
 
+  const isCompleted = session.status === 'completed' || finalStrategies.length > 0
+  const isFailed = session.status === 'failed' && finalStrategies.length === 0
+  const isRunning = !isCompleted && !isFailed
+
   const getStatusInfo = (status) => {
+    if (finalStrategies.length > 0 || status === 'completed') {
+      return { label: 'اكتملت الجلسة ✓', color: 'text-success' }
+    }
     const map = {
       'pending':              { label: 'في الانتظار',              color: 'text-secondary' },
       'running_session':      { label: 'جاري التشغيل',             color: 'text-info' },
@@ -75,13 +82,10 @@ const SessionCard = ({ session, onDelete }) => {
   }
 
   const statusInfo = getStatusInfo(session.status)
-  const isCompleted = session.status === 'completed'
-  const isFailed = session.status === 'failed'
-  const isRunning = !isCompleted && !isFailed
 
   const getSummary = () => {
-    if (passedStrategies.length > 0) {
-      return `تم اعتماد وإصدار ${passedStrategies.length} استراتيجية بنجاح من مجلس الخبراء والأمير وتوزيعها للتنفيذ.`
+    if (finalStrategies.length > 0) {
+      return `تم اعتماد وإصدار ${finalStrategies.length} استراتيجية بنجاح من مجلس الخبراء والأمير وتوزيعها للتنفيذ.`
     }
     if (isFailed) {
       return opinionsData.error || 'فشلت الجلسة أثناء المعالجة.'
@@ -132,10 +136,9 @@ const SessionCard = ({ session, onDelete }) => {
     return String(val)
   }
 
-  // ✅ تنزيل تقرير الـ PDF مباشرة للجهاز بدون فتح نوافذ
-  const handleExportPDF = async (e) => {
+  // ✅ تنزيل / طباعة تقرير الجلسة والحوار كـ PDF احترافي
+  const handleExportPDF = (e) => {
     e.stopPropagation()
-    if (isPdfGenerating) return
 
     const expertRoundsList = [
       { key: 'chartist',     name: '1. الشارتيست الكمي (تحليل السلوك السعري والشموع والمؤشرات)', round: '1_dissection' },
@@ -148,128 +151,293 @@ const SessionCard = ({ session, onDelete }) => {
       { key: 'prince',       name: '8. الأمير (صانع القرار القياسي واعتماد الاستراتيجيات)',   round: '7_standard_decree' },
     ]
 
-    try {
-      setIsPdfGenerating(true)
-
-      const allDialogue = []
-      for (const exp of expertRoundsList) {
-        const raw = getExpertDialogue(exp.key, exp.round)
-        if (raw) {
-          allDialogue.push({ name: exp.name, text: stringifyOpinion(raw) })
-        }
+    const allDialogue = []
+    for (const exp of expertRoundsList) {
+      const raw = getExpertDialogue(exp.key, exp.round)
+      if (raw) {
+        allDialogue.push({ name: exp.name, text: stringifyOpinion(raw) })
       }
+    }
 
-      // Container for PDF generation (must be in viewport coordinate space with zIndex -9999 so html2canvas renders it)
-      const container = document.createElement('div')
-      container.style.position = 'fixed'
-      container.style.top = '0'
-      container.style.left = '0'
-      container.style.width = '790px'
-      container.style.zIndex = '-9999'
-      container.style.opacity = '1'
-      container.style.pointerEvents = 'none'
-      container.style.padding = '25px'
-      container.style.background = '#ffffff'
-      container.style.color = '#0f172a'
-      container.style.fontFamily = "'Cairo', Tahoma, Arial, sans-serif"
-      container.style.direction = 'rtl'
-      container.style.textAlign = 'right'
-      container.style.lineHeight = '1.7'
+    // Fallback: If allDialogue is empty, scan whole opinionsData
+    if (allDialogue.length === 0 && session.expert_opinions) {
+      try {
+        const rawObj = typeof session.expert_opinions === 'object' ? session.expert_opinions : JSON.parse(session.expert_opinions)
+        const searchIn = rawObj.rounds || rawObj
+        for (const [k, v] of Object.entries(searchIn)) {
+          if (typeof v === 'object' && v !== null) {
+            for (const [subK, subV] of Object.entries(v)) {
+              if (subV) allDialogue.push({ name: subK, text: stringifyOpinion(subV) })
+            }
+          } else if (v) {
+            allDialogue.push({ name: k, text: stringifyOpinion(v) })
+          }
+        }
+      } catch (err) {}
+    }
 
-      container.innerHTML = `
-        <div style="border-bottom: 2px solid #d4af37; padding-bottom: 14px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center;">
+    const printWindow = window.open('', '_blank', 'width=1000,height=1100')
+    if (!printWindow) {
+      alert('يرجى السماح بالنوافذ المنبثقة لتحميل وطباعة ملف الـ PDF')
+      return
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+      <head>
+        <meta charset="utf-8" />
+        <title>تقرير اجتماع الخبراء العلمي - #${session.id.slice(0, 8)}</title>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
+          
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
+          
+          body {
+            font-family: 'Cairo', Tahoma, Arial, sans-serif;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            padding: 30px;
+            margin: 0;
+            line-height: 1.7;
+            direction: rtl;
+          }
+
+          .toolbar {
+            position: sticky;
+            top: 0;
+            background: #0f172a;
+            color: #ffffff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+          }
+
+          .btn-print {
+            background: linear-gradient(135deg, #d4af37, #f59e0b);
+            color: #000000;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-weight: 800;
+            font-size: 13.5px;
+            cursor: pointer;
+            font-family: 'Cairo', Tahoma, sans-serif;
+          }
+
+          .header {
+            border-bottom: 2px solid #d4af37;
+            padding-bottom: 14px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+
+          .logo {
+            font-size: 21px;
+            font-weight: 800;
+            color: #b45309;
+          }
+
+          .meta-info {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 4px;
+          }
+
+          .badge {
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            padding: 5px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #0f172a;
+          }
+
+          .decree-box {
+            background: #f8fafc !important;
+            border: 1px solid #e2e8f0;
+            border-right: 5px solid #d4af37 !important;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 22px;
+            font-size: 13px;
+          }
+
+          .section-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #0f172a;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 6px;
+            margin: 24px 0 14px 0;
+          }
+
+          .strategies-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 14px;
+            margin-bottom: 24px;
+          }
+
+          .strat-card {
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 8px;
+            padding: 14px;
+            background: #ffffff !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          .strat-card h4 {
+            margin: 0 0 10px 0;
+            font-size: 13.5px;
+            color: #0f172a;
+            border-bottom: 1px solid #f1f5f9;
+            padding-bottom: 6px;
+          }
+
+          .strat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px dashed #f1f5f9;
+          }
+
+          .debate-item {
+            margin-bottom: 14px;
+            padding: 14px 18px;
+            background: #f8fafc !important;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0 !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          .expert-name {
+            font-weight: 700;
+            color: #b45309;
+            font-size: 13px;
+            margin-bottom: 6px;
+          }
+
+          .expert-text {
+            font-size: 12px;
+            color: #334155;
+            white-space: pre-wrap;
+            line-height: 1.8;
+          }
+
+          .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 11px;
+            color: #94a3b8;
+          }
+
+          @media print {
+            @page {
+              size: A4;
+              margin: 12mm;
+            }
+            body {
+              padding: 0 !important;
+            }
+            .toolbar, .no-print {
+              display: none !important;
+            }
+            .strategies-grid {
+              grid-template-columns: 1fr 1fr 1fr !important;
+            }
+            .strat-card, .debate-item, .decree-box {
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="toolbar no-print">
           <div>
-            <div style="font-size: 19px; font-weight: 800; color: #b45309;">🦅 منصة صقر — محضر اجتماع الخبراء العلمي الرسمي</div>
-            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+            <span style="font-weight: bold; color: #facc15;">🦅 تقرير اجتماع الخبراء العلمي</span>
+            <span style="font-size: 12px; color: #94a3b8; margin-right: 12px;">اختر "حفظ بتنسيق PDF" (Save as PDF) ثم حفظ</span>
+          </div>
+          <button class="btn-print" onclick="window.print()">🖨️ حفظ كـ PDF / طباعة</button>
+        </div>
+
+        <div class="header">
+          <div>
+            <div class="logo">🦅 منصة صقر — محضر اجتماع الخبراء العلمي الرسمي</div>
+            <div class="meta-info">
               جلسة رقم #${session.id.slice(0, 8)} | العملة: ${session.symbol} | التاريخ: ${formatDate(session.created_at)}
             </div>
           </div>
-          <div style="background: #f8fafc; border: 1px solid #cbd5e1; padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: bold; color: #0f172a;">
-            ${session.market_type === 'stable' ? 'سوق مستقر' : 'سوق متوتر'}
+          <div>
+            <span class="badge">${session.market_type === 'stable' ? 'سوق مستقر' : 'سوق متوتر'}</span>
           </div>
         </div>
 
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-right: 4px solid #d4af37; padding: 14px; border-radius: 6px; margin-bottom: 20px; font-size: 12.5px; color: #0f172a;">
+        <div class="decree-box">
           <strong style="color: #b45309;">📜 خلاصة قرار المجلس والأمير:</strong><br />
           ${getSummary()}
         </div>
 
-        <div style="font-size: 14px; font-weight: bold; color: #0f172a; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 6px; margin: 18px 0 12px 0;">
-          📊 الاستراتيجيات المعتمدة الصادرة عن المجلس (${finalStrategies.length} استراتيجية):
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
+        <div class="section-title">📊 الاستراتيجيات المعتمدة الصادرة عن المجلس (${finalStrategies.length} استراتيجية):</div>
+        <div class="strategies-grid">
           ${finalStrategies.map((s, idx) => `
-            <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; background: #ffffff; color: #0f172a;">
-              <div style="font-weight: bold; font-size: 13px; color: #0f172a; margin-bottom: 8px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;">
-                ${s.name || `استراتيجية ${idx + 1}`} (درجة الثقة: ${s.confidence_score ? String(s.confidence_score).replace('%', '') : '85'}%)
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
-                <span style="color: #64748b;">النوع:</span><strong style="color: #0f172a;">${formatType(s.type)}</strong>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
-                <span style="color: #64748b;">الهدف (TP):</span><strong style="color: #16a34a;">+${s.target_pct}%</strong>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
-                <span style="color: #64748b;">وقف الخسارة (SL):</span><strong style="color: #dc2626;">-${s.sl_pct}%</strong>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
-                <span style="color: #64748b;">نسبة العائد للمخاطرة:</span><strong style="color: #b45309;">1:${s.risk_reward || (Number(s.target_pct) / Math.max(0.1, Number(s.sl_pct))).toFixed(1)}</strong>
-              </div>
-              ${s.entry_description ? `
-                <div style="font-size: 10.5px; color: #475569; margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e2e8f0; line-height: 1.5;">
-                  <strong style="color: #0f172a;">الوصف الفني وقواعد الدخول:</strong><br />${s.entry_description}
-                </div>
-              ` : ''}
+            <div class="strat-card">
+              <h4>${s.name || `استراتيجية ${idx + 1}`} (درجة الثقة: ${s.confidence_score ? String(s.confidence_score).replace('%', '') : '85'}%)</h4>
+              <div class="strat-row"><span style="color: #64748b;">نوع الاستراتيجية:</span><strong style="color: #0f172a;">${formatType(s.type)}</strong></div>
+              <div class="strat-row"><span style="color: #64748b;">الهدف الربحي (TP):</span><strong style="color: #16a34a;">+${s.target_pct}%</strong></div>
+              <div class="strat-row"><span style="color: #64748b;">وقف الخسارة الصارم (SL):</span><strong style="color: #dc2626;">-${s.sl_pct}%</strong></div>
+              <div class="strat-row"><span style="color: #64748b;">نسبة العائد للمخاطرة:</span><strong style="color: #b45309;">1:${s.risk_reward || (Number(s.target_pct) / Math.max(0.1, Number(s.sl_pct))).toFixed(1)}</strong></div>
+              ${s.entry_description ? `<div style="font-size: 11px; color: #475569; margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e2e8f0; line-height: 1.5;"><strong>نص الوصف الفني وقواعد الدخول:</strong><br />${s.entry_description}</div>` : ''}
             </div>
           `).join('')}
         </div>
 
-        <div style="font-size: 14px; font-weight: bold; color: #0f172a; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 6px; margin: 20px 0 12px 0;">
-          💬 محضر المداولات الكامل والحوار بين الخبراء الـ 8:
-        </div>
+        <div class="section-title">💬 محضر المداولات الكامل والحوار بين الخبراء الـ 8:</div>
         ${allDialogue.length > 0 ? allDialogue.map(d => `
-          <div style="margin-bottom: 12px; padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0; page-break-inside: avoid; color: #0f172a;">
-            <div style="font-weight: bold; color: #b45309; font-size: 12px; margin-bottom: 4px;">👤 ${d.name}</div>
-            <div style="font-size: 11.5px; color: #334155; white-space: pre-wrap; line-height: 1.7;">${d.text}</div>
+          <div class="debate-item">
+            <div class="expert-name">👤 ${d.name}</div>
+            <div class="expert-text">${d.text}</div>
           </div>
         `).join('') : '<div style="font-size: 12px; color: #94a3b8; padding: 10px;">لا توجد نصوص مسجلة في هذه الجلسة.</div>'}
 
-        <div style="text-align: center; margin-top: 25px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #94a3b8;">
+        <div class="footer">
           تم إصدار هذا التقرير تلقائياً من محرك التداول الكمي والذكاء الاصطناعي — منصة صقر (SAQR)
         </div>
-      `
 
-      document.body.appendChild(container)
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 600);
+          }
+        </script>
+      </body>
+      </html>
+    `
 
-      // Wait 150ms for styles and layout calculation
-      await new Promise(resolve => setTimeout(resolve, 150))
-
-      const opt = {
-        margin: [10, 10, 10, 10],
-        filename: `تقرير_اجتماع_الخبراء_${session.symbol.replace(/[\/\\]/g, '_')}_${session.id.slice(0, 6)}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          letterRendering: true,
-          scrollY: 0,
-          scrollX: 0,
-          windowWidth: 790
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      }
-
-      const html2pdfModule = await import('html2pdf.js')
-      const html2pdf = html2pdfModule.default || html2pdfModule
-
-      await html2pdf().set(opt).from(container).save()
-      document.body.removeChild(container)
-    } catch (err) {
-      console.error('PDF export error:', err)
-      alert('حدث خطأ أثناء تنزيل الـ PDF: ' + err.message)
-    } finally {
-      setIsPdfGenerating(false)
-    }
+    printWindow.document.open()
+    printWindow.document.write(htmlContent)
+    printWindow.document.close()
   }
 
   return (
