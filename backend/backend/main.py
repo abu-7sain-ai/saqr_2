@@ -30,6 +30,7 @@ from backend.services.notifier import Notifier
 from backend.telegram_bot import run_bot
 from backend.database import Database
 from backend.models.schemas import KitchenSessionCreate
+from backend.services.whitelist_groups import get_group_list, get_symbols_for_groups
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -135,14 +136,14 @@ async def get_historical_coverage(symbol: str, timeframe: str = "4h", years: int
 async def trigger_factory(req: SessionTriggerRequest):
     global active_background_tasks
     factory = StrategyFactory()
-    if req.session_id in active_background_tasks:
+    if req.session_id in active_background_tasks and not active_background_tasks[req.session_id].done():
         return {"status": "already_running"}
     session = factory.db.get_session(req.session_id)
     if session and (session.get('status') in ['completed', 'failed']):
         return {"status": "finished", "session_id": req.session_id}
     factory.db.update_session_status(req.session_id, "running_session")
-    active_background_tasks.add(req.session_id)
-    asyncio.create_task(run_and_track_session(factory, req.session_id))
+    task = asyncio.create_task(run_and_track_session(factory, req.session_id))
+    active_background_tasks[req.session_id] = task
     return {"status": "triggered"}
 
 @app.post("/api/v1/kitchen/clone-worker", tags=["Kitchen"])
@@ -256,6 +257,60 @@ async def get_advisor_balance():
         logger.error(f"Failed to fetch Advisor balance: {e}")
         return {"total_credits": 0}
 
+@app.get("/api/v1/workers", tags=["Workers"])
+async def get_all_workers():
+    """Fetch all workers directly via admin client to ensure 100% visibility."""
+    try:
+        supabase = get_supabase_admin_client()
+        res = supabase.table('workers').select('*').order('created_at', desc=True).execute()
+        return res.data or []
+    except Exception as e:
+        logger.error(f"Failed to fetch workers: {e}")
+        return []
+
+@app.patch("/api/v1/workers/{worker_id}/status", tags=["Workers"])
+async def update_worker_status(worker_id: str, payload: dict):
+    try:
+        status = payload.get('status')
+        if not status:
+            raise HTTPException(status_code=400, detail="Missing status")
+        supabase = get_supabase_admin_client()
+        res = supabase.table('workers').update({"status": status}).eq('id', worker_id).execute()
+        return {"success": True, "data": res.data}
+    except Exception as e:
+        logger.error(f"Failed to update worker status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/v1/workers/{worker_id}/promote", tags=["Workers"])
+async def promote_worker(worker_id: str):
+    try:
+        supabase = get_supabase_admin_client()
+        res = supabase.table('workers').update({"type": "live"}).eq('id', worker_id).execute()
+        return {"success": True, "data": res.data}
+    except Exception as e:
+        logger.error(f"Failed to promote worker: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/v1/workers/stopped", tags=["Workers"])
+async def delete_all_stopped_workers():
+    try:
+        supabase = get_supabase_admin_client()
+        res = supabase.table('workers').delete().eq('status', 'stopped').execute()
+        return {"success": True, "data": res.data}
+    except Exception as e:
+        logger.error(f"Failed to delete stopped workers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/v1/workers/{worker_id}", tags=["Workers"])
+async def delete_single_worker(worker_id: str):
+    try:
+        supabase = get_supabase_admin_client()
+        res = supabase.table('workers').delete().eq('id', worker_id).execute()
+        return {"success": True, "data": res.data}
+    except Exception as e:
+        logger.error(f"Failed to delete worker {worker_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/v1/workers/balance", tags=["Workers"])
 async def get_workers_balance():
     from backend.services.exchange_service import get_total_cash
@@ -366,6 +421,14 @@ async def get_worker_trades(worker_id: str):
         logger.error(f"Error fetching worker trades for {worker_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/v1/whitelist/groups", tags=["Whitelist"])
+async def get_whitelist_groups():
+    """إرجاع تعريف مجموعات القائمة البيضاء للاختيار في واجهة إنشاء الاجتماع."""
+    try:
+        return {"groups": get_group_list()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/v1/kitchen/sessions", tags=["Kitchen"])
 async def get_kitchen_sessions(market_type: str = None):
     try:
@@ -382,10 +445,14 @@ async def get_kitchen_sessions(market_type: str = None):
 async def create_kitchen_session(req: KitchenSessionCreate):
     try:
         supabase = get_supabase_admin_client()
-        valid = supabase.table('whitelist').select('symbol, is_active').eq('symbol', req.symbol).execute().data
-        logger.info(f"🔍 Whitelist check for '{req.symbol}': {valid}")
-        if not valid:
-            raise HTTPException(status_code=400, detail=f"العملة '{req.symbol}' غير موجودة في القائمة المعتمدة")
+        # ✅ FIX: لو symbol = 'ALL' يعني دراسة السوق العام — لا نفحص عملة محددة
+        if req.symbol and req.symbol.upper() != 'ALL':
+            valid = supabase.table('whitelist').select('symbol, is_active').eq('symbol', req.symbol).execute().data
+            logger.info(f"🔍 Whitelist check for '{req.symbol}': {valid}")
+            if not valid:
+                raise HTTPException(status_code=400, detail=f"العملة '{req.symbol}' غير موجودة في القائمة المعتمدة")
+        else:
+            logger.info("🌐 General Market Study (ALL whitelist) — skipping individual symbol check")
         # ✅ FIX: استخرج market_id من worker_settings عشان factory._spawn_worker تلاقيها
         ws = req.worker_settings or {}
         market_id_from_ws = ws.get('marketId') or ws.get('market_id')
@@ -404,9 +471,9 @@ async def create_kitchen_session(req: KitchenSessionCreate):
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to create session")
         session_id = res.data[0]['id']
-        if session_id not in active_background_tasks:
-            active_background_tasks.add(session_id)
-            asyncio.create_task(run_and_track_session(StrategyFactory(), session_id))
+        if session_id not in active_background_tasks or active_background_tasks[session_id].done():
+            task = asyncio.create_task(run_and_track_session(StrategyFactory(), session_id))
+            active_background_tasks[session_id] = task
         return {"session_id": session_id, "status": "pending"}
     except Exception as e:
         if isinstance(e, HTTPException): raise e
@@ -426,11 +493,46 @@ async def get_kitchen_session_detail(session_id: str):
 @app.delete("/api/v1/kitchen/sessions/{session_id}", tags=["Kitchen"])
 async def delete_kitchen_session(session_id: str):
     try:
-        # ✅ FIX: استخدم admin client عشان RLS مش يبلوك الحذف من الـ backend
+        # 1. إلغاء المهمة في الخلفية فوراً
+        task = active_background_tasks.pop(session_id, None)
+        if task and not task.done():
+            task.cancel()
+            logger.info(f"🛑 Cancelled active background task for session {session_id}")
+
         supabase = get_supabase_admin_client()
-        active_background_tasks.discard(session_id)
-        supabase.table('kitchen_sessions').delete().eq('id', session_id).execute()
+
+        # 2. حذف الجلسة وتفكيك ارتباط الموظفين بسرعة في الخلفية
+        def _do_delete():
+            try:
+                supabase.table('workers').update({"kitchen_session_id": None, "session_id": None}).eq('kitchen_session_id', session_id).execute()
+            except Exception:
+                pass
+            try:
+                supabase.table('kitchen_sessions').delete().eq('id', session_id).execute()
+            except Exception as e:
+                logger.warning(f"Background delete failed: {e}")
+
+        asyncio.create_task(asyncio.to_thread(_do_delete))
         return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"delete_kitchen_session error: {e}")
+        return {"status": "deleted", "note": str(e)}
+
+@app.post("/api/v1/kitchen/sessions/{session_id}/stop", tags=["Kitchen"])
+async def stop_kitchen_session(session_id: str):
+    try:
+        task = active_background_tasks.pop(session_id, None)
+        if task and not task.done():
+            task.cancel()
+            logger.info(f"🛑 Stopped task for session {session_id}")
+        supabase = get_supabase_admin_client()
+        await asyncio.to_thread(
+            lambda: supabase.table('kitchen_sessions').update({
+                "status": "failed",
+                "expert_opinions": {"error": "تم إيقاف الجلسة بناءً على طلب المستخدم"}
+            }).eq('id', session_id).execute()
+        )
+        return {"status": "stopped"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -468,7 +570,7 @@ async def scheduled_worker_run():
     try: await WorkerEngine.run_all_workers()
     except Exception as e: logger.error(f"Worker engine error: {e}")
 
-active_background_tasks = set()
+active_background_tasks = {}
 
 async def scheduled_kitchen_check():
     global active_background_tasks
@@ -485,7 +587,7 @@ async def scheduled_kitchen_check():
 
         for s in (pending or []):
             sid = s['id']
-            if sid in active_background_tasks:
+            if sid in active_background_tasks and not active_background_tasks[sid].done():
                 continue
             logger.info(f"🕵️ KitchenWatcher: Starting pending session {sid}")
             # ✅ FIX: نتأكد إن الـ update نجح قبل ما نشغل الـ task
@@ -495,16 +597,11 @@ async def scheduled_kitchen_check():
             if not update_resp.data:
                 # شخص تاني خد الـ session قبلنا
                 continue
-            active_background_tasks.add(sid)
-            asyncio.create_task(run_and_track_session(StrategyFactory(), sid))
+            task = asyncio.create_task(run_and_track_session(StrategyFactory(), sid))
+            active_background_tasks[sid] = task
 
         # ========================================================
         # 2. RESCUE STUCK — مش اتحدثت من 10 دقايق ومش في active set
-        #    ✅ FIX: بنستخدم updated_at مش created_at
-        #    السبب: لما الـ server بيعيد التشغيل، active_background_tasks بيتمسح
-        #    فالجلسة اللي خلصت بتبقى status=completed لكن created_at قديمة
-        #    لو كنا بنشيك على created_at هنعمل rescue لجلسات خلصت!
-        #    updated_at بيتغير مع كل round → لو مش اتحدث من 10 دقايق فهي فعلاً عالقة
         # ========================================================
         limit = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
         stuck = supabase.table('kitchen_sessions').select('id, status')\
@@ -515,7 +612,7 @@ async def scheduled_kitchen_check():
 
         for s in (stuck or []):
             sid = s['id']
-            if sid in active_background_tasks:
+            if sid in active_background_tasks and not active_background_tasks[sid].done():
                 # لسه شغالة عندنا — مش محتاجين نعمل rescue
                 continue
             # ✅ FIX: نجيب الـ session من DB ونتأكد إنها فعلاً مش completed/failed
@@ -527,12 +624,11 @@ async def scheduled_kitchen_check():
             if fresh_status in ('completed', 'failed', 'pending'):
                 continue
             logger.info(f"🕵️ KitchenWatcher: Rescuing stuck session {sid} (status: {fresh_status})")
-            active_background_tasks.add(sid)
-            asyncio.create_task(run_and_track_session(StrategyFactory(), sid))
+            task = asyncio.create_task(run_and_track_session(StrategyFactory(), sid))
+            active_background_tasks[sid] = task
 
         # ========================================================
-        # 3. HEARTBEAT WATCHDOG — مفيش update من 8 دقايق
-        #    ✅ FIX: بنشيل من active_tasks قبل الـ fail
+        # 3. HEARTBEAT WATCHDOG — مفيش update من 25 دقيقة
         # ========================================================
         heartbeat_limit = (datetime.now(timezone.utc) - timedelta(minutes=25)).isoformat()
         hanging = supabase.table('kitchen_sessions').select('id, status')\
@@ -542,20 +638,18 @@ async def scheduled_kitchen_check():
 
         for s in (hanging or []):
             sid = s['id']
-            # ✅ FIX: لو هي في active_tasks معناها لسه شغالة — متلمسهاش
-            if sid in active_background_tasks:
+            if sid in active_background_tasks and not active_background_tasks[sid].done():
                 continue
-            logger.warning(f"🚨 KitchenWatcher: Session {sid} hanging (no heartbeat 8m). Auto-failing.")
-            # ✅ FIX: نشيل من active أولاً عشان الـ rescue مش يلاقيها
-            active_background_tasks.discard(sid)
+            logger.warning(f"🚨 KitchenWatcher: Session {sid} hanging (no heartbeat). Auto-failing.")
+            task = active_background_tasks.pop(sid, None)
+            if task and not task.done():
+                task.cancel()
             reason = "توقف النظام عن الاستجابة (Heartbeat Timeout)"
             db.update_session_data(sid, {"status": "failed", "expert_opinions": {"error": reason}})
             await Notifier.send_telegram(f"🚨 [KITCHEN] تم إيقاف الجلسة {sid[:8]} بسبب عدم الاستجابة.")
 
         # ========================================================
         # 4. GLOBAL TIMEOUT — أقدم من 45 دقيقة
-        #    ✅ FIX: رفعنا لـ 45 دقيقة + بنشيل من active قبل الـ fail
-        #    ✅ FIX: لو هي في active_tasks معناها لسه شغالة — بنوقفها بشكل نظيف
         # ========================================================
         global_limit = (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat()
         too_long = supabase.table('kitchen_sessions').select('id, created_at, status')\
@@ -566,8 +660,9 @@ async def scheduled_kitchen_check():
         for s in (too_long or []):
             sid = s['id']
             logger.warning(f"🚨 KitchenWatcher: Session {sid} exceeded 45m global limit. Auto-failing.")
-            # ✅ FIX: نشيل من active أولاً — هيخلي run_and_track_session يلاقيها failed ويوقف
-            active_background_tasks.discard(sid)
+            task = active_background_tasks.pop(sid, None)
+            if task and not task.done():
+                task.cancel()
             db.update_session_data(sid, {
                 "status": "failed",
                 "expert_opinions": {"error": "تجاوزت الجلسة الحد الأقصى للمدة (45 دقيقة)"}
@@ -597,6 +692,15 @@ async def run_and_track_session(factory, session_id):
 
         await factory.run_session(session_id)
 
+    except asyncio.CancelledError:
+        logger.info(f"🛑 Session {session_id} task was cancelled gracefully.")
+        try:
+            factory.db.update_session_data(session_id, {
+                "status": "failed",
+                "expert_opinions": {"error": "تم إيقاف الجلسة بناءً على طلب المستخدم"}
+            })
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"[CRITICAL] Session {session_id} crashed: {e}", exc_info=True)
         try:
@@ -608,7 +712,7 @@ async def run_and_track_session(factory, session_id):
             logger.error(f"Failed to update session {session_id} after crash: {db_err}")
     finally:
         # ✅ FIX: دايماً بنشيل من active في النهاية
-        active_background_tasks.discard(session_id)
+        active_background_tasks.pop(session_id, None)
 
 
 async def scheduled_historical_update():

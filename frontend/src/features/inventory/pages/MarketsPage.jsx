@@ -17,10 +17,75 @@ import {
   X,
   Zap,
   TrendingUp,
-  Globe
+  Globe,
+  Layers,
+  ShieldCheck
 } from 'lucide-react'
 import { supabase } from '../../../services/supabase'
 import { kitchenService } from '../../kitchen/services/kitchenService'
+
+// ─── Whitelist Groups Definition ─────────────────────────────
+const WHITELIST_GROUPS = [
+  {
+    id: 'leaders',
+    name: '🔵 القادة',
+    name_ar: 'القادة',
+    description: 'العملات القيادية الأعلى سيولة وتأثيراً في السوق',
+    color: '#3b82f6',
+    symbols: ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'BTC/USDC', 'ETH/USDC', 'ETH/BTC']
+  },
+  {
+    id: 'layer1',
+    name: '🟢 الطبقة الأولى',
+    name_ar: 'الطبقة الأولى',
+    description: 'بلوكتشينات الجيل القادم عالية الأداء والتوسع',
+    color: '#22c55e',
+    symbols: [
+      'ADA/USDT', 'AVAX/USDT', 'DOT/USDT', 'NEAR/USDT', 'ATOM/USDT',
+      'ICP/USDT', 'SUI/USDT', 'TON/USDT', 'FTM/USDT', 'HBAR/USDT',
+      'TIA/USDT', 'SEI/USDT', 'ADA/USDC', 'AVAX/USDC', 'DOT/USDC',
+      'NEAR/USDC', 'ATOM/USDC', 'ADA/BTC', 'AVAX/BTC', 'DOT/BTC',
+      'NEAR/BTC', 'FTM/BTC', 'ICP/BTC', 'ATOM/BTC', 'AVAX/ETH', 'DOT/ETH'
+    ]
+  },
+  {
+    id: 'defi_layer2',
+    name: '🟡 DeFi والطبقة الثانية',
+    name_ar: 'ديفاي والطبقة الثانية',
+    description: 'بروتوكولات التمويل اللامركزي وحلول التوسع والذكاء',
+    color: '#eab308',
+    symbols: [
+      'ARB/USDT', 'OP/USDT', 'LINK/USDT', 'GRT/USDT', 'STX/USDT',
+      'RENDER/USDT', 'WLD/USDT', 'PYTH/USDT', 'ARB/USDC', 'OP/USDC',
+      'LINK/USDC', 'GRT/USDC', 'LINK/BTC', 'GRT/BTC', 'LINK/ETH'
+    ]
+  },
+  {
+    id: 'classic',
+    name: '⚪ الكلاسيكيات',
+    name_ar: 'الكلاسيكيات',
+    description: 'العملات الكلاسيكية الموثوقة ذات التاريخ الطويل والسيولة العالية',
+    color: '#94a3b8',
+    symbols: [
+      'XRP/USDT', 'LTC/USDT', 'BCH/USDT', 'XMR/USDT', 'XLM/USDT',
+      'ETC/USDT', 'DOGE/USDT', 'TRX/USDT', 'VET/USDT', 'FIL/USDT',
+      'THETA/USDT', 'XRP/USDC', 'LTC/USDC', 'BCH/USDC', 'FIL/USDC',
+      'XRP/BTC', 'TRX/BTC', 'DOGE/BTC', 'BCH/BTC', 'XMR/BTC',
+      'XLM/BTC', 'LTC/BTC', 'ETC/BTC', 'FIL/BTC', 'VET/BTC',
+      'THETA/BTC', 'HBAR/BTC', 'XRP/ETH'
+    ]
+  }
+]
+
+const getSymbolGroup = (symbol) => {
+  const clean = (symbol || '').toUpperCase().trim()
+  for (const g of WHITELIST_GROUPS) {
+    if (g.symbols.some(s => s.toUpperCase() === clean || s.replace('/', '').toUpperCase() === clean.replace('/', ''))) {
+      return g
+    }
+  }
+  return { id: 'classic', name: '⚪ الكلاسيكيات', color: '#94a3b8' }
+}
 
 // ─── Market type config ───────────────────────────────────────
 const MARKET_TYPES = [
@@ -299,11 +364,99 @@ const MarketsPage = () => {
   )
 }
 
+// ─── Whitelist Groups Display Component ────────────────────────
+const WhitelistGroupsDisplay = ({ selectedGroup, onSelectGroup, marketItems }) => {
+  return (
+    <div className="glass-card p-4 shadow-sm mt-4" style={{ borderTop: '2px solid var(--saqr-gold)', borderRadius: 20 }}>
+      <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+        <div className="d-flex align-items-center gap-3">
+          <div className="p-2 rounded-3 bg-white bg-opacity-5 text-gold">
+            <Layers size={20} />
+          </div>
+          <div>
+            <h5 className="m-0 fw-bold text-gold fs-6">
+              🗂️ المجموعات الذكية للقائمة البيضاء (Smart Asset Groups)
+            </h5>
+            <p className="text-silver opacity-60 small m-0 mt-1">
+              تصنيف العملات المعتمدة إلى 4 فئات استراتيجية للتداول المخصص في الاجتماعات
+            </p>
+          </div>
+        </div>
+        {selectedGroup && (
+          <button
+            onClick={() => onSelectGroup?.(null)}
+            className="btn btn-sm btn-outline-secondary py-1 px-3 text-silver"
+            style={{ fontSize: '12px', borderRadius: 8 }}
+          >
+            إلغاء التصفية (عرض الكل)
+          </button>
+        )}
+      </div>
+
+      <div className="row g-3">
+        {WHITELIST_GROUPS.map((g) => {
+          const isSelected = selectedGroup === g.id
+          const countInMarket = marketItems ? marketItems.filter(item => getSymbolGroup(item.symbol).id === g.id).length : g.symbols.length
+          return (
+            <div key={g.id} className="col-12 col-md-6 col-xl-3">
+              <div
+                onClick={() => onSelectGroup?.(isSelected ? null : g.id)}
+                className="p-3 rounded-4 border transition-all h-100 position-relative"
+                style={{
+                  cursor: 'pointer',
+                  background: isSelected ? 'rgba(212, 175, 55, 0.15)' : 'rgba(255,255,255,0.03)',
+                  borderColor: isSelected ? (g.color || '#d4af37') : 'rgba(255,255,255,0.08)',
+                  transform: isSelected ? 'translateY(-2px)' : 'none',
+                  boxShadow: isSelected ? `0 4px 20px ${g.color}33` : 'none'
+                }}
+              >
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <span className="fw-bold text-white fs-6">{g.name}</span>
+                  <span
+                    className="badge"
+                    style={{
+                      background: isSelected ? (g.color || '#d4af37') : 'rgba(255,255,255,0.1)',
+                      color: isSelected ? '#000' : '#fff',
+                      fontSize: '11px'
+                    }}
+                  >
+                    {countInMarket} عملة
+                  </span>
+                </div>
+                <p className="extra-small text-secondary mb-3" style={{ fontSize: '11px', lineHeight: 1.4 }}>
+                  {g.description}
+                </p>
+                <div className="d-flex flex-wrap gap-1" style={{ maxHeight: '60px', overflowY: 'hidden' }}>
+                  {g.symbols.slice(0, 5).map(s => (
+                    <span
+                      key={s}
+                      className="badge bg-dark border text-silver"
+                      style={{ fontSize: '9px', borderColor: 'rgba(255,255,255,0.1)' }}
+                    >
+                      {s.split('/')[0]}
+                    </span>
+                  ))}
+                  {g.symbols.length > 5 && (
+                    <span className="badge bg-white bg-opacity-5 text-secondary" style={{ fontSize: '9px' }}>
+                      +{g.symbols.length - 5} أكثر
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ═══════════════════════════════════════════════════════════════
 // MARKET CARD
 // ═══════════════════════════════════════════════════════════════
 const MarketCard = ({ market, expanded, onToggleExpand, onDelete, onToggleActive, onRefresh }) => {
   const [syncing, setSyncing] = useState(false)
+  const [activeGroupFilter, setActiveGroupFilter] = useState(null)
   const api = market.market_apis?.[0]
   const typeColor = TYPE_COLOR[market.type] || '#FFD700'
   const typeLabel = TYPE_LABEL[market.type] || market.type
@@ -429,6 +582,8 @@ const MarketCard = ({ market, expanded, onToggleExpand, onDelete, onToggleActive
                 icon={<ShoppingCart size={18} />}
                 color="#00FFCC"
                 hasReason={false}
+                activeGroupFilter={activeGroupFilter}
+                onSelectGroupFilter={setActiveGroupFilter}
               />
             </div>
             {/* Leaders */}
@@ -444,6 +599,14 @@ const MarketCard = ({ market, expanded, onToggleExpand, onDelete, onToggleActive
               />
             </div>
           </div>
+
+          {/* 🎯 قسم المجموعات الذكية للقائمة البيضاء تحت القائمة */}
+          <div className="mt-4">
+            <WhitelistGroupsDisplay
+              selectedGroup={activeGroupFilter}
+              onSelectGroup={setActiveGroupFilter}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -453,7 +616,7 @@ const MarketCard = ({ market, expanded, onToggleExpand, onDelete, onToggleActive
 // ═══════════════════════════════════════════════════════════════
 // SYMBOL LIST (Whitelist / Leaders)
 // ═══════════════════════════════════════════════════════════════
-const SymbolList = ({ marketId, table, title, subtitle, icon, color, hasReason }) => {
+const SymbolList = ({ marketId, table, title, subtitle, icon, color, hasReason, activeGroupFilter, onSelectGroupFilter }) => {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -482,6 +645,14 @@ const SymbolList = ({ marketId, table, title, subtitle, icon, color, hasReason }
   useEffect(() => {
     load()
   }, [load])
+
+  // Filter items by active group for whitelist
+  const displayItems = items.filter((item) => {
+    if (table === 'whitelist' && activeGroupFilter) {
+      return getSymbolGroup(item.symbol).id === activeGroupFilter
+    }
+    return true
+  })
 
   // Search logic (using Binance as default for crypto)
   const searchSymbol = async (query) => {
@@ -584,8 +755,8 @@ const SymbolList = ({ marketId, table, title, subtitle, icon, color, hasReason }
   }
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === items.length) setSelectedIds([])
-    else setSelectedIds(items.map(i => i.id))
+    if (selectedIds.length === displayItems.length) setSelectedIds([])
+    else setSelectedIds(displayItems.map(i => i.id))
   }
 
   const toggleSelect = (id) => {
@@ -672,6 +843,41 @@ const SymbolList = ({ marketId, table, title, subtitle, icon, color, hasReason }
           )}
         </div>
       </div>
+
+      {/* Smart Group Filter Tabs for Whitelist */}
+      {table === 'whitelist' && (
+        <div className="d-flex flex-wrap gap-1 mb-3">
+          <button
+            type="button"
+            onClick={() => onSelectGroupFilter?.(null)}
+            className={`btn btn-sm py-1 px-2 ${!activeGroupFilter ? 'btn-gold text-dark fw-bold' : 'btn-outline-secondary text-silver'}`}
+            style={{ fontSize: '11px', borderRadius: 8 }}
+          >
+            🌐 الكل ({items.length})
+          </button>
+          {WHITELIST_GROUPS.map((g) => {
+            const count = items.filter(it => getSymbolGroup(it.symbol).id === g.id).length
+            const isSelected = activeGroupFilter === g.id
+            return (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => onSelectGroupFilter?.(isSelected ? null : g.id)}
+                className={`btn btn-sm py-1 px-2 ${isSelected ? 'fw-bold' : 'text-silver'}`}
+                style={{
+                  fontSize: '11px',
+                  borderRadius: 8,
+                  background: isSelected ? g.color : 'rgba(255,255,255,0.05)',
+                  color: isSelected ? '#000' : '#ccc',
+                  border: `1px solid ${isSelected ? g.color : 'rgba(255,255,255,0.1)'}`
+                }}
+              >
+                {g.name} ({count})
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* Add Form (Search) */}
       {adding && !bulkMode && (
@@ -762,25 +968,25 @@ const SymbolList = ({ marketId, table, title, subtitle, icon, color, hasReason }
           <div className="text-center py-5">
             <RefreshCcw className="text-gold spin" size={30} />
           </div>
-        ) : items.length === 0 ? (
+        ) : displayItems.length === 0 ? (
           <div className="text-center py-5 text-silver opacity-25 d-flex flex-column align-items-center gap-3">
             <X size={40} />
-            <span>لا توجد رموز مضافة لهذه القائمة</span>
+            <span>{activeGroupFilter ? 'لا توجد رموز في هذه المجموعة المختارة' : 'لا توجد رموز مضافة لهذه القائمة'}</span>
           </div>
         ) : (
           <div className="d-flex flex-column gap-2">
-            {items.length > 0 && (
+            {displayItems.length > 0 && (
               <div className="d-flex align-items-center gap-2 mb-3 px-3 py-2 rounded-3 bg-white bg-opacity-5">
                 <input 
                   type="checkbox" 
                   className="form-check-input m-0 cursor-pointer" 
-                  checked={selectedIds.length === items.length && items.length > 0}
+                  checked={selectedIds.length === displayItems.length && displayItems.length > 0}
                   onChange={toggleSelectAll}
                 />
-                <span className="small text-secondary fw-bold">تحديد الكل</span>
+                <span className="small text-secondary fw-bold">تحديد الكل ({displayItems.length})</span>
               </div>
             )}
-            {items.map((item) => (
+            {displayItems.map((item) => (
               <div key={item.id} className="symbol-row p-3 rounded-4 transition-all">
                 <div className="d-flex align-items-center gap-3">
                   <input 
@@ -805,7 +1011,22 @@ const SymbolList = ({ marketId, table, title, subtitle, icon, color, hasReason }
                     />
                   </div>
                   <div>
-                    <div className="text-white fw-bold fs-6">{item.symbol}</div>
+                    <div className="d-flex align-items-center gap-2">
+                      <span className="text-white fw-bold fs-6">{item.symbol}</span>
+                      {table === 'whitelist' && (
+                        <span
+                          className="badge"
+                          style={{
+                            background: `${getSymbolGroup(item.symbol).color}22`,
+                            color: getSymbolGroup(item.symbol).color,
+                            border: `1px solid ${getSymbolGroup(item.symbol).color}55`,
+                            fontSize: '9px'
+                          }}
+                        >
+                          {getSymbolGroup(item.symbol).name}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-silver opacity-40 x-small fw-medium">
                       {item.symbol_name || 'Asset'}
                     </div>

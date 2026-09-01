@@ -5,7 +5,9 @@
 # Environment variables — NEVER commit
 .env
 .env.*
-!.env.example
+backend/env
+*.env
+!*.env.example
 
 # Python
 __pycache__/

@@ -85,11 +85,11 @@ const KitchenPage = () => {
           symbol: s.symbol || s.expert_opinions?.symbol || 'BTCUSDT'
         }))
       
-      // Detect failures to show toast
+      // Detect failures to show toast (only for active running session)
       normalizedSessions.forEach(s => {
         const oldS = sessions.find(os => os.id === s.id)
-        if (s.status === 'failed' && oldS && oldS.status !== 'failed') {
-          showToast(`⚠️ فشل في الجلسة ${s.id.slice(0, 4)}: ${s.expert_opinions?.error || 'خطأ غير معروف'}`, 'error')
+        if (s.status === 'failed' && oldS && oldS.status !== 'failed' && activeSession?.id === s.id) {
+          showToast(`⚠️ فشل في الجلسة: ${s.expert_opinions?.error || 'خطأ غير معروف'}`, 'error')
         }
       })
 
@@ -141,10 +141,11 @@ const KitchenPage = () => {
 
   useEffect(() => {
     fetchData()
-    // Poll for session updates every 5 seconds
+    // Poll for session updates dynamically: 1.8s for active session, 5s for idle
+    const pollInterval = activeSession ? 1800 : 5000
     const interval = setInterval(() => {
       fetchData()
-    }, 5000)
+    }, pollInterval)
 
     const openCloningHandler = (e) => {
       setCloningStrategy(e.detail.strategy)
@@ -156,44 +157,48 @@ const KitchenPage = () => {
       clearInterval(interval)
       window.removeEventListener('open-cloning-modal', openCloningHandler)
     }
-  }, [])
+  }, [activeSession])
 
   const handleStartSession = async (config) => {
-    if (!config.symbol) {
-      showToast('الرجاء التأكد من اختيار السوق والعملة أولاً قبل بدء الاجتماع.', 'error')
-      return
-    }
+    const chosenSymbol = config.symbol || 'ALL'
 
     setIsModalOpen(false)
     setLoading(true)
     try {
-      // ✅ FIX: بنبعت worker_settings منفصلة عشان الـ backend يحفظها في الجلسة
       const { data, error } = await storeCreateSession({
-        symbol: config.symbol,
+        symbol: chosenSymbol,
         timeframe: config.timeframe || '4h',
         market_type: config.marketType || 'stable',
         worker_settings: {
-          capital:           config.capital,
-          workerType:        'paper',           // default paper حتى يتغير يدوياً
+          capital:           config.capital || '1000',
+          workerType:        'paper',
           marketType:        config.marketType || 'stable',
-          tradeSizingType:   config.tradeSizingType,
-          tradeSizingValue:  config.tradeSizingValue,
-          maxOpenTradesType: config.maxOpenTradesType,
-          maxOpenTradesValue:config.maxOpenTradesValue,
-          liquidityType:     config.liquidityType,
-          tpType:            config.tpType,
-          tpValue:           config.tpValue,
-          slType:            config.slType,
-          slValue:           config.slValue,
-          expiryType:        config.expiryType,
-          expiryValue:       config.expiryValue,
-          portfolioShareType:config.portfolioShareType,
-          issuersType:       config.issuersType,
-          angle:             config.angle,
-          buddyId:           config.buddyId,
-          baseWorkerId:      config.baseWorkerId,
-          selectionCriteria: config.selectionCriteria,
-          marketId:          config.marketId,
+          tradeSizingType:   config.tradeSizingType || 'percent_allocation',
+          tradeSizingValue:  config.tradeSizingValue || '10',
+          maxOpenTradesType: config.maxOpenTradesType || 'limit',
+          maxOpenTradesValue:config.maxOpenTradesValue || '3',
+          liquidityType:     config.liquidityType || 'strict',
+          tpType:            config.tpType || 'recommended',
+          tpValue:           config.tpValue || '3',
+          slType:            config.slType || 'recommended_trailing',
+          slValue:           config.slValue || '1.5',
+          expiryType:        config.expiryType || 'recommended',
+          expiryValue:       config.expiryValue || '60',
+          portfolioShareType:config.portfolioShareType || 'percent_comp',
+          issuersType:       config.issuersType || 'both',
+          angle:             config.angle || 'new',
+          buddyId:           config.buddyId || null,
+          baseWorkerId:      config.baseWorkerId || null,
+          selectionCriteria: config.selectionCriteria || 'success_rate',
+          marketId:          config.marketId || '',
+          selectedGroups:    config.selectedGroups || [],
+          expert_models: (() => {
+            try {
+              return JSON.parse(localStorage.getItem('saqr_expert_models') || '{}')
+            } catch (e) {
+              return {}
+            }
+          })(),
         }
       })
       if (error) throw new Error(error)
@@ -253,18 +258,14 @@ const KitchenPage = () => {
 
   const handleDeleteSession = async (sessionId) => {
     if (activeSession?.id === sessionId) setActiveSession(null)
-    const { success, error } = await storeDeleteSession(sessionId)
-    if (!success) {
-      alert('فشل في حذف الجلسة: ' + error)
-    }
+    showToast('🗑️ تم إيقاف/حذف الجلسة بنجاح', 'info')
+    await storeDeleteSession(sessionId)
   }
 
   const handleDeleteAllSessions = async () => {
     if (!window.confirm('هل أنت متأكد من مسح جميع الاجتماعات المنتهية؟')) return
-    const { success, error } = await storeDeleteAllSessions()
-    if (!success) {
-      alert('خطأ في مسح السجل: ' + error)
-    }
+    showToast('🧹 جاري مسح السجل...', 'info')
+    await storeDeleteAllSessions()
   }
 
   return (
@@ -285,14 +286,11 @@ const KitchenPage = () => {
         <div className="d-flex gap-3 align-items-center">
           {activeSession && (
             <button
-              onClick={() => {
-                if (window.confirm('هل تريد فعلاً إلغاء الجلسة الحالية وبدء جلسة جديدة؟')) {
-                  handleDeleteSession(activeSession.id)
-                }
-              }}
-              className="btn btn-outline-ruby px-4 py-3 rounded-pill fw-bold"
+              onClick={() => handleDeleteSession(activeSession.id)}
+              className="btn btn-outline-ruby px-4 py-3 rounded-pill fw-bold d-flex align-items-center gap-2"
+              title="إيقاف وحذف الجلسة الحالية بنقرة واحدة"
             >
-              إلغاء الجلسة الحالية
+              <Trash2 size={16} /> إلغاء الجلسة الحالية
             </button>
           )}
           <button

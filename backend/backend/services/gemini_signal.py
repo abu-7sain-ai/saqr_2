@@ -102,11 +102,10 @@ async def _call_groq(
     )
 
     groq_models = [
-        "qwen/qwen3.6-27b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
-        "groq/compound-mini",
-        "groq/compound",
+        "qwen/qwen3.6-27b",
+        "llama-3.3-70b-versatile",
     ]
 
     client = get_groq_client()

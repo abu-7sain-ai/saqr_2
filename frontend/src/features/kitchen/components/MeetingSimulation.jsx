@@ -17,7 +17,9 @@ import {
 import { useSettingStore } from '../../settings/store/useSettingStore'
 
 const MODEL_LABELS = {
-  'groq/compound': 'Groq Compound',
+  'openai/gpt-oss-120b': 'GPT-OSS 120B (Groq)',
+  'groq/compound': 'GPT-OSS 120B (Groq)',
+  'compound': 'GPT-OSS 120B (Groq)',
   'google/gemini-2.5-flash': 'Gemini 2.5 Flash',
   'anthropic/claude-sonnet-4': 'Claude Sonnet 4',
   'openai/gpt-4.1-mini': 'GPT-4.1 Mini',
@@ -102,7 +104,16 @@ const MeetingSimulation = ({ session, onDelete }) => {
   ]
 
   const experts = allExperts.map(exp => {
-    const rawModel = expertModelsForm[exp.id] || 'google/gemini-2.5-flash'
+    const savedInSession = session?.worker_settings?.expert_models?.[exp.id]
+    const savedInStore = expertModelsForm[exp.id]
+    const savedInLocal = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('saqr_expert_models') || '{}')[exp.id]
+      } catch (e) {
+        return null
+      }
+    })()
+    const rawModel = savedInSession || savedInStore || savedInLocal || 'openai/gpt-oss-120b'
     const label = MODEL_LABELS[rawModel] || rawModel.split('/').pop()
     return {
       ...exp,
@@ -186,15 +197,12 @@ const MeetingSimulation = ({ session, onDelete }) => {
           </div>
           <div className="d-flex align-items-center gap-3">
             <button
-              onClick={() => {
-                if (window.confirm('هل أنت متأكد من رغبتك في إيقاف الجلسة العلمية؟')) {
-                  onDelete(session.id)
-                }
-              }}
+              onClick={() => onDelete(session.id)}
               className="btn btn-dark-ruby border-0 p-2 px-3 rounded-3 d-flex align-items-center gap-2 transition-all hover-ruby"
-              style={{ background: 'rgba(220, 38, 38, 0.1)', color: 'var(--saqr-ruby)' }}
+              style={{ background: 'rgba(220, 38, 38, 0.15)', color: 'var(--saqr-ruby)', cursor: 'pointer' }}
+              title="إيقاف الجلسة فوراً"
             >
-              <Trash2 size={16} /> <span className="small fw-bold">إيقاف</span>
+              <Trash2 size={16} /> <span className="small fw-bold">إيقاف فوري</span>
             </button>
 
             <div className="d-flex gap-1">

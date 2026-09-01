@@ -7,16 +7,76 @@ export const workerService = {
    * Fetch all workers for the current user
    */
   async getWorkers() {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/v1/workers`)
+      if (response.ok) {
+        const data = await response.json()
+        if (Array.isArray(data)) return data
+      }
+    } catch (e) {
+      console.warn('Backend /api/v1/workers failed, falling back to Supabase:', e)
+    }
+
     const { data, error } = await supabase
       .from('workers')
       .select('*')
-      .order('number', { ascending: true })
+      .order('created_at', { ascending: false })
 
     if (error) {
       console.error('Error fetching workers:', error)
-      throw error
+      return []
     }
-    return data
+    return data || []
+  },
+
+  async updateWorkerStatus(workerId, status) {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/v1/workers/${workerId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      })
+      if (response.ok) return await response.json()
+    } catch (e) {
+      console.warn('Backend update worker status failed, falling back to Supabase:', e)
+    }
+    return await supabase.from('workers').update({ status }).eq('id', workerId)
+  },
+
+  async deleteWorker(workerId) {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/v1/workers/${workerId}`, {
+        method: 'DELETE'
+      })
+      if (response.ok) return await response.json()
+    } catch (e) {
+      console.warn('Backend delete worker failed, falling back to Supabase:', e)
+    }
+    return await supabase.from('workers').delete().eq('id', workerId)
+  },
+
+  async deleteAllStoppedWorkers() {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/v1/workers/stopped`, {
+        method: 'DELETE'
+      })
+      if (response.ok) return await response.json()
+    } catch (e) {
+      console.warn('Backend delete stopped workers failed, falling back to Supabase:', e)
+    }
+    return await supabase.from('workers').delete().eq('status', 'stopped')
+  },
+
+  async promoteWorker(workerId) {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/v1/workers/${workerId}/promote`, {
+        method: 'PATCH'
+      })
+      if (response.ok) return await response.json()
+    } catch (e) {
+      console.warn('Backend promote worker failed, falling back to Supabase:', e)
+    }
+    return await supabase.from('workers').update({ type: 'live' }).eq('id', workerId)
   },
 
   /**

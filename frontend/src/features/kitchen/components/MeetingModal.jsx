@@ -13,6 +13,7 @@ import {
   Loader2,
   Cpu,
   Shield,
+  ShieldCheck,
   Clock,
   Link,
   Zap,
@@ -29,13 +30,60 @@ import {
 import { kitchenService } from '../services/kitchenService'
 import { workerService } from '../../workers/services/workerService'
 
+const DEFAULT_WHITELIST_GROUPS = [
+  {
+    id: 'leaders',
+    name: '🔵 القادة',
+    name_ar: 'القادة',
+    description: 'العملات القيادية الأعلى سيولة وتأثيراً في السوق (BTC, ETH, SOL, BNB...)',
+    color: '#3b82f6',
+    symbol_count: 7,
+    symbols: ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'BTC/USDC', 'ETH/USDC', 'ETH/BTC']
+  },
+  {
+    id: 'layer1',
+    name: '🟢 الطبقة الأولى',
+    name_ar: 'الطبقة الأولى',
+    description: 'بلوكتشينات الجيل القادم عالية الأداء (ADA, AVAX, DOT, NEAR, SUI, TON...)',
+    color: '#22c55e',
+    symbol_count: 26,
+    symbols: ['ADA/USDT', 'AVAX/USDT', 'DOT/USDT', 'NEAR/USDT', 'ATOM/USDT', 'ICP/USDT', 'SUI/USDT', 'TON/USDT', 'FTM/USDT', 'HBAR/USDT', 'TIA/USDT', 'SEI/USDT']
+  },
+  {
+    id: 'defi_layer2',
+    name: '🟡 DeFi والطبقة الثانية',
+    name_ar: 'ديفاي والطبقة الثانية',
+    description: 'بروتوكولات التمويل اللامركزي وحلول التوسع (ARB, OP, LINK, STX, RENDER...)',
+    color: '#eab308',
+    symbol_count: 15,
+    symbols: ['ARB/USDT', 'OP/USDT', 'LINK/USDT', 'GRT/USDT', 'STX/USDT', 'RENDER/USDT', 'WLD/USDT', 'PYTH/USDT']
+  },
+  {
+    id: 'classic',
+    name: '⚪ الكلاسيكيات',
+    name_ar: 'الكلاسيكيات',
+    description: 'العملات الكلاسيكية الموثوقة ذات التاريخ الطويل (XRP, LTC, BCH, DOGE, TRX...)',
+    color: '#94a3b8',
+    symbol_count: 28,
+    symbols: ['XRP/USDT', 'LTC/USDT', 'BCH/USDT', 'XMR/USDT', 'XLM/USDT', 'ETC/USDT', 'DOGE/USDT', 'TRX/USDT', 'VET/USDT', 'FIL/USDT', 'THETA/USDT']
+  }
+]
+
 const MeetingModal = ({ isOpen, onClose, onStart }) => {
   const [loading, setLoading] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [markets, setMarkets] = useState([])
   const [workers, setWorkers] = useState([])
-  const [availableSymbols, setAvailableSymbols] = useState([])
+  const [availableSymbols, setAvailableSymbols] = useState([
+    { symbol: '🌐 دراسة السوق العام (توزيع متعدد العملات)', realSymbol: 'ALL' }
+  ])
   const [coverageLoading, setCoverageLoading] = useState(false)
-  const [coverageResult, setCoverageResult] = useState(null)
+  const [coverageResult, setCoverageResult] = useState({ ok: true, coverage: 1.0 })
+
+  // --- Whitelist Groups State (مُهيأة افتراضياً للظهور اللحظي الفوري 0ms) ---
+  const [scopeMode, setScopeMode] = useState('groups') // 'groups' | 'single'
+  const [whitelistGroups, setWhitelistGroups] = useState(DEFAULT_WHITELIST_GROUPS)
+  const [selectedGroups, setSelectedGroups] = useState(['all']) // ['all'] or array of IDs
 
   // --- The 12 Fields State ---
   const [issuersType, setIssuersType] = useState('both') // Field 1: Standard/Developed/Both
@@ -62,22 +110,25 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
   const [angle, setAngle] = useState('new') // Field 10: New/Improve
   const [baseWorkerId, setBaseWorkerId] = useState('')
 
-
   const [portfolioShareType, setPortfolioShareType] = useState('percent_comp') // Field 12: Fixed/Percent (Comp/NoComp)
-  // ---------------------------
-
-  const [selectionCriteria, setSelectionCriteria] = useState('success_rate') // The "Concurrent" point
+  const [selectionCriteria, setSelectionCriteria] = useState('success_rate')
   const [marketId, setMarketId] = useState('')
-  const [symbol, setSymbol] = useState('')
+  const [symbol, setSymbol] = useState('ALL')
 
   useEffect(() => {
-    if (isOpen) loadData()
+    if (isOpen) {
+      setIsSubmitting(false)
+      if (markets.length === 0) {
+        loadData()
+      }
+    }
   }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
-    if (!symbol) {
-      setCoverageResult(null)
+    if (scopeMode === 'groups' || !symbol || symbol === 'ALL') {
+      setCoverageResult({ ok: true, coverage: 1.0 })
+      setCoverageLoading(false)
       return
     }
 
@@ -87,22 +138,18 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
       try {
         const resp = await kitchenService.getHistoricalCoverage(symbol, '4h', 10)
         if (!cancelled) {
-          // If backend is down or returned no data, treat as "unknown" not "failed"
-          // so the button stays enabled
           if (resp?.data) {
             setCoverageResult(resp.data)
           } else {
-            // Backend unreachable — don't block the button, just clear coverage info
             setCoverageResult(null)
           }
         }
       } catch (e) {
         if (!cancelled) {
-          // Backend error — show soft warning but don't block the meeting button
           setCoverageResult({
-            ok: null, // null = unknown (not false), so button stays enabled
+            ok: null,
             coverage: 0,
-            error: '⚠️ تعذّر التحقق من البيانات التاريخية (الـ Backend غير متاح). يمكنك المتابعة أو تشغيل المزامنة أولاً.'
+            error: '⚠️ تعذّر التحقق من البيانات التاريخية. يمكنك المتابعة أو تشغيل المزامنة أولاً.'
           })
         }
       } finally {
@@ -114,47 +161,60 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
     return () => {
       cancelled = true
     }
-  }, [isOpen, symbol])
+  }, [isOpen, symbol, scopeMode])
 
   const loadData = async () => {
-    setLoading(true)
     try {
-      // Fetch markets and workers independently so one failure doesn't block the other
-      const [marketList, workerList] = await Promise.allSettled([
+      const [marketList, workerList, groupsList] = await Promise.allSettled([
         kitchenService.getMarkets(),
-        kitchenService.getWorkers()
+        kitchenService.getWorkers(),
+        kitchenService.getWhitelistGroups()
       ])
 
-      const markets = marketList.status === 'fulfilled' ? (marketList.value || []) : []
-      const workers = workerList.status === 'fulfilled' ? (workerList.value || []) : []
+      const m = marketList.status === 'fulfilled' ? (marketList.value || []) : []
+      const w = workerList.status === 'fulfilled' ? (workerList.value || []) : []
+      const g = groupsList.status === 'fulfilled' ? (groupsList.value || []) : []
 
-      setMarkets(markets)
-      setWorkers(workers)
+      setMarkets(m)
+      setWorkers(w)
+      setWhitelistGroups(g)
 
-      if (marketList.status === 'rejected') {
-        console.warn('MeetingModal: failed to load markets', marketList.reason)
-      }
-
-      if (markets.length > 0) {
-        const initialMarketId = markets[0].id
+      if (m.length > 0) {
+        const initialMarketId = m[0].id
         setMarketId(initialMarketId)
         loadSymbols(initialMarketId)
       }
     } catch (err) {
       console.error('Error loading modal data:', err)
-    } finally {
-      setLoading(false)
     }
+  }
+
+  const toggleGroup = (groupId) => {
+    if (groupId === 'all') {
+      setSelectedGroups(['all'])
+      return
+    }
+    let updated = selectedGroups.filter(g => g !== 'all')
+    if (updated.includes(groupId)) {
+      updated = updated.filter(g => g !== groupId)
+      if (updated.length === 0) {
+        updated = ['all']
+      }
+    } else {
+      updated.push(groupId)
+    }
+    setSelectedGroups(updated)
   }
 
   const loadSymbols = async (mId) => {
     try {
       const symbols = await kitchenService.getMarketSymbols(mId)
       const list = symbols || []
-      // Add Market Proxy option
-      const finalSymbols = [{ symbol: '🌐 دراسة السوق العام (توزيع متعدد العملات)', realSymbol: 'BTC/USDT' }, ...list]
+      const finalSymbols = [{ symbol: '🌐 دراسة السوق العام (توزيع متعدد العملات)', realSymbol: 'ALL' }, ...list]
       setAvailableSymbols(finalSymbols)
-      setSymbol(finalSymbols[0].realSymbol || finalSymbols[0].symbol)
+      if (!symbol) {
+        setSymbol('ALL')
+      }
     } catch (err) {
       console.error('Error loading symbols:', err)
     }
@@ -167,11 +227,9 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
 
   if (!isOpen) return null
 
-  // Block the button ONLY if backend explicitly confirmed data is bad (ok === false)
-  // If backend is unreachable (ok === null) or no result yet, keep button enabled
-  const coverageOk = coverageResult?.ok === false ? false : true
-
   const handleStart = () => {
+    if (isSubmitting) return
+    setIsSubmitting(true)
     onStart({
       issuersType,
       marketType,
@@ -192,8 +250,9 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
       baseWorkerId,
       portfolioShareType,
       selectionCriteria,
-      marketId,
-      symbol
+      marketId: marketId || (markets[0]?.id || ''),
+      symbol: scopeMode === 'groups' ? 'ALL' : (symbol || 'ALL'),
+      selectedGroups: scopeMode === 'groups' ? selectedGroups : []
     })
   }
 
@@ -249,7 +308,7 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
               </div>
             </div>
 
-            {/* 2. بيئة العمل (Field 2 & 10) */}
+            {/* 2. بيئة العمل والسوق المستهدف (Field 2 & Whitelist Groups) */}
             <div className="col-12 border-bottom border-white border-opacity-5 pb-4">
               <div className="row g-3">
                 <div className="col-md-6">
@@ -264,23 +323,6 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
                         {m.name}
                       </option>
                     ))}
-                  </select>
-                  <label className="extra-small text-secondary mt-3 mb-2 d-block">العملة المستهدفة</label>
-                  <select
-                    className="form-select bg-dark border-white border-opacity-10 text-white py-2 shadow-none"
-                    value={symbol}
-                    onChange={(e) => setSymbol(e.target.value)}
-                    disabled={availableSymbols.length === 0}
-                  >
-                    {availableSymbols.length > 0 ? (
-                      availableSymbols.map((s, idx) => (
-                        <option key={idx} value={s.realSymbol || s.symbol} style={{backgroundColor:"#1a1a2e", color:"white"}}>
-                          {s.symbol}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="">لا توجد عملات في هذا السوق</option>
-                    )}
                   </select>
                 </div>
                 <div className="col-md-6">
@@ -299,6 +341,138 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* 🎯 قسم اختيار المجموعات الذكية أو العملة الفردية */}
+                <div className="col-12 mt-3">
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <label className="extra-small text-gold fw-bold d-flex align-items-center gap-1">
+                      <Layers size={14} /> نطاق أصول التداول والاستثمار
+                    </label>
+                    <div className="btn-group btn-group-sm">
+                      <button
+                        type="button"
+                        className={`btn btn-sm px-3 ${scopeMode === 'groups' ? 'btn-gold text-dark fw-bold' : 'btn-outline-secondary text-secondary'}`}
+                        onClick={() => setScopeMode('groups')}
+                        style={{ fontSize: '11px', borderRadius: '6px 0 0 6px' }}
+                      >
+                        🗂️ مجموعات ذكية (موصى به)
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm px-3 ${scopeMode === 'single' ? 'btn-gold text-dark fw-bold' : 'btn-outline-secondary text-secondary'}`}
+                        onClick={() => setScopeMode('single')}
+                        style={{ fontSize: '11px', borderRadius: '0 6px 6px 0' }}
+                      >
+                        🎯 عملة فردية
+                      </button>
+                    </div>
+                  </div>
+
+                  {scopeMode === 'groups' ? (
+                    <div>
+                      <div className="row g-2 mt-1">
+                        {/* بطاقة كل القائمة */}
+                        <div className="col-12 col-sm-6 col-lg-4">
+                          <div
+                            onClick={() => toggleGroup('all')}
+                            className="p-2 rounded-3 border transition-all cursor-pointer h-100 position-relative"
+                            style={{
+                              cursor: 'pointer',
+                              background: selectedGroups.includes('all') ? 'rgba(212, 175, 55, 0.12)' : 'rgba(255,255,255,0.03)',
+                              borderColor: selectedGroups.includes('all') ? '#d4af37' : 'rgba(255,255,255,0.08)'
+                            }}
+                          >
+                            <div className="d-flex justify-content-between align-items-center mb-1">
+                              <span className="small fw-bold text-white">🌐 كل القائمة البيضاء</span>
+                              <span className="badge bg-gold text-dark fw-bold" style={{ fontSize: '10px' }}>78 عملة</span>
+                            </div>
+                            <div className="extra-small text-secondary" style={{ fontSize: '11px' }}>
+                              تحليل وتداول على كافة أصول القائمة المعتمدة
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* بطاقات المجموعات المخصصة */}
+                        {whitelistGroups.map((g) => {
+                          const isSelected = selectedGroups.includes(g.id) || selectedGroups.includes('all')
+                          const isDirectlySelected = selectedGroups.includes(g.id)
+                          return (
+                            <div key={g.id} className="col-12 col-sm-6 col-lg-4">
+                              <div
+                                onClick={() => toggleGroup(g.id)}
+                                className="p-2 rounded-3 border transition-all cursor-pointer h-100 position-relative"
+                                style={{
+                                  cursor: 'pointer',
+                                  background: isDirectlySelected
+                                    ? 'rgba(212, 175, 55, 0.15)'
+                                    : (selectedGroups.includes('all') ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)'),
+                                  borderColor: isDirectlySelected
+                                    ? (g.color || '#d4af37')
+                                    : (selectedGroups.includes('all') ? 'rgba(212, 175, 55, 0.4)' : 'rgba(255,255,255,0.08)')
+                                }}
+                              >
+                                <div className="d-flex justify-content-between align-items-center mb-1">
+                                  <span className="small fw-bold text-white">{g.name}</span>
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      background: isDirectlySelected ? (g.color || '#d4af37') : 'rgba(255,255,255,0.1)',
+                                      color: isDirectlySelected ? '#000' : '#ccc',
+                                      fontSize: '10px'
+                                    }}
+                                  >
+                                    {g.symbol_count || g.symbols?.length || 0} عملة
+                                  </span>
+                                </div>
+                                <div className="extra-small text-secondary" style={{ fontSize: '11px', lineHeight: 1.3 }}>
+                                  {g.description}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* شريط معلومات النطاق المختار */}
+                      <div
+                        className="mt-2 p-2 rounded-2 d-flex align-items-center justify-content-between"
+                        style={{ background: 'rgba(212, 175, 55, 0.08)', border: '1px dashed rgba(212, 175, 55, 0.3)' }}
+                      >
+                        <div className="extra-small text-silver d-flex align-items-center gap-2">
+                          <ShieldCheck size={14} className="text-gold" />
+                          <span>
+                            <strong>النطاق النشط: </strong>
+                            {selectedGroups.includes('all')
+                              ? 'جميع مجموعات القائمة البيضاء (78 عملة)'
+                              : selectedGroups.map(gid => whitelistGroups.find(g => g.id === gid)?.name || gid).join(' + ')}
+                          </span>
+                        </div>
+                        <span className="badge bg-dark border border-gold text-gold" style={{ fontSize: '10px' }}>
+                          🔒 حصر التداول للموظفين
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <select
+                        className="form-select bg-dark border-white border-opacity-10 text-white py-2 shadow-none"
+                        value={symbol}
+                        onChange={(e) => setSymbol(e.target.value)}
+                        disabled={availableSymbols.length === 0}
+                      >
+                        {availableSymbols.length > 0 ? (
+                          availableSymbols.map((s, idx) => (
+                            <option key={idx} value={s.realSymbol || s.symbol} style={{backgroundColor:"#1a1a2e", color:"white"}}>
+                              {s.symbol}
+                            </option>
+                          ))
+                        ) : (
+                          <option value="">لا توجد عملات في هذا السوق</option>
+                        )}
+                      </select>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -481,13 +655,17 @@ const MeetingModal = ({ isOpen, onClose, onStart }) => {
               </div>
             )}
             <button
+              type="button"
               onClick={handleStart}
-              disabled={loading}
+              disabled={isSubmitting}
               className="btn btn-gold w-100 py-3 fw-bold d-flex align-items-center justify-content-center gap-2 shadow-gold-lg"
-              style={{ borderRadius: '16px' }}
+              style={{ borderRadius: '16px', cursor: isSubmitting ? 'not-allowed' : 'pointer' }}
             >
-              {loading ? (
-                <Loader2 className="animate-spin" size={20} />
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="animate-spin" size={20} />
+                  <span>جاري بدء الجلسة فوراً...</span>
+                </>
               ) : (
                 <>
                   <Play size={18} fill="currentColor" /> <span>عقد الاجتماع العلمي الآن</span>

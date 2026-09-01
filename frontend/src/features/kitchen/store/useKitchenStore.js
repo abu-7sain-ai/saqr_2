@@ -46,7 +46,7 @@ export const useKitchenStore = create((set, get) => ({
   },
 
   /**
-   * Start a new session
+   * Start a new session with instant UI addition
    */
   createSession: async (config) => {
     set({ isLoading: true, error: null })
@@ -56,41 +56,48 @@ export const useKitchenStore = create((set, get) => ({
       return { success: false, error }
     }
 
-    // ✅ FIX: backend بيرجع { session_id, status } — نحوله لـ object بـ .id
-    // عشان الـ sessions list وأي كود تاني يشتغل صح
-    const sessionObj = data?.id ? data : { ...data, id: data?.session_id, status: data?.status || 'pending' }
+    const sessionObj = data?.id ? data : {
+      ...data,
+      id: data?.session_id,
+      status: data?.status || 'collecting_data',
+      symbol: config.symbol || 'ALL',
+      market_type: config.market_type || 'stable',
+      worker_settings: config.worker_settings || {},
+      created_at: new Date().toISOString()
+    }
 
-    // ما بنضيفوش للقايمة هنا لأن الـ polling هيجيب الجلسة الكاملة من Supabase
-    set({ isLoading: false })
+    // ⚡ إضافة الجلسة فوراً للواجهة ليظهر مجلس المحاكاة في 0ms
+    set((state) => ({
+      sessions: [sessionObj, ...state.sessions.filter(s => s.id !== sessionObj.id)],
+      isLoading: false
+    }))
 
     return { success: true, data: sessionObj }
   },
 
   /**
-   * Delete a session
+   * Delete a session with instant optimistic UI removal
    */
   deleteSession: async (id) => {
-    const { success, error } = await kitchenService.deleteSession(id)
-    if (success) {
-      set((state) => ({
-        sessions: state.sessions.filter((s) => s.id !== id)
-      }))
-    }
-    return { success, error }
+    // ⚡ تحديث فوري لحظي للواجهة 0ms
+    set((state) => ({
+      sessions: state.sessions.filter((s) => s.id !== id)
+    }))
+    const res = await kitchenService.deleteSession(id)
+    return res
   },
 
   /**
-   * Clear all non-active sessions
+   * Clear all non-active sessions with instant optimistic UI removal
    */
   deleteAllSessions: async () => {
-    const { success, error } = await kitchenService.deleteAllSessions()
-    if (success) {
-      set((state) => ({
-        sessions: state.sessions.filter((s) => 
-          s.status === 'processing' || s.status === 'pending'
-        )
-      }))
-    }
-    return { success, error }
+    // ⚡ تحديث فوري لحظي للواجهة 0ms
+    set((state) => ({
+      sessions: state.sessions.filter((s) => 
+        s.status === 'processing' || s.status === 'pending' || s.status === 'running_session'
+      )
+    }))
+    const res = await kitchenService.deleteAllSessions()
+    return res
   }
 }))

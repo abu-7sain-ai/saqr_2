@@ -31,11 +31,15 @@ const SessionCard = ({ session, onDelete }) => {
     })
   }
 
-  // ✅ Parse expert_opinions
-  const opinionsData =
-    typeof session.expert_opinions === 'string'
+  // ✅ Parse expert_opinions safely
+  let opinionsData = {}
+  try {
+    opinionsData = typeof session?.expert_opinions === 'string'
       ? JSON.parse(session.expert_opinions)
-      : session.expert_opinions || {}
+      : session?.expert_opinions || {}
+  } catch (e) {
+    opinionsData = {}
+  }
 
   const passedStrategies = session.final_decision?.passed || []
   const failedStrategies = session.final_decision?.failed || []
@@ -118,15 +122,43 @@ const SessionCard = ({ session, onDelete }) => {
 
   const stringifyOpinion = (val) => {
     if (!val) return ''
-    if (typeof val === 'string') return val
+    if (typeof val === 'string') {
+      const clean = val.replace(/```(?:json)?/g, '').trim()
+      if ((clean.startsWith('{') || clean.startsWith('[')) && (clean.includes('"strategies"') || clean.includes('strategies'))) {
+        try {
+          const match = clean.match(/\{[\s\S]*\}/)
+          if (match) {
+            const parsed = JSON.parse(match[0])
+            if (parsed.strategies && Array.isArray(parsed.strategies)) {
+              return parsed.strategies.map((s, idx) => 
+                `📜 **الاستراتيجية ${idx+1}: [${s.name || 'بدون اسم'}]** (${formatType(s.type)})\n` +
+                `• **الهدف الربحي (TP):** +${s.target_pct}%\n` +
+                `• **وقف الخسارة (SL):** -${s.sl_pct}%\n` +
+                `• **نسبة العائد للمخاطرة:** 1:${s.risk_reward || 2}\n` +
+                `• **درجة الثقة:** ${s.confidence_score || '85%'}\n` +
+                `• **قواعد وشروط الدخول:**\n${s.entry_description || s.description || 'حسب التوصيات القياسية للمجلس'}`
+              ).join('\n\n---\n\n')
+            }
+          }
+        } catch (e) {}
+      }
+      return val
+    }
     if (typeof val === 'object') {
+      if (val.strategies && Array.isArray(val.strategies)) {
+        return val.strategies.map((s, idx) => 
+          `📜 **الاستراتيجية ${idx+1}: [${s.name || 'بدون اسم'}]** (${formatType(s.type)})\n` +
+          `• **الهدف الربحي (TP):** +${s.target_pct}%\n` +
+          `• **وقف الخسارة (SL):** -${s.sl_pct}%\n` +
+          `• **نسبة العائد للمخاطرة:** 1:${s.risk_reward || 2}\n` +
+          `• **درجة الثقة:** ${s.confidence_score || '85%'}\n` +
+          `• **قواعد وشروط الدخول:**\n${s.entry_description || s.description || 'حسب التوصيات القياسية للمجلس'}`
+        ).join('\n\n---\n\n')
+      }
       if (val.opinion) return String(val.opinion)
       if (val.text) return String(val.text)
       if (val.analysis) return String(val.analysis)
       if (val.hypothesis) return String(val.hypothesis)
-      if (val.strategies && Array.isArray(val.strategies)) {
-        return val.strategies.map((s, idx) => `• ${s.name || `استراتيجية ${idx+1}`}: الهدف +${s.target_pct}% | الوقف -${s.sl_pct}% | ${s.entry_description || ''}`).join('\n')
-      }
       try {
         return JSON.stringify(val, null, 2)
       } catch (e) {
@@ -134,6 +166,55 @@ const SessionCard = ({ session, onDelete }) => {
       }
     }
     return String(val)
+  }
+
+  const formatMarkdownToHtml = (rawText) => {
+    if (!rawText) return ''
+    let text = String(rawText)
+
+    // Convert code blocks
+    text = text.replace(/```([\s\S]*?)```/g, '<pre style="background:#f1f5f9; padding:10px; border-radius:6px; font-size:11px; overflow-x:auto;"><code>$1</code></pre>')
+
+    // Convert Markdown tables
+    const tableRegex = /((?:\|[^\n]+\|\r?\n?)+)/g
+    text = text.replace(tableRegex, (match) => {
+      const rows = match.trim().split('\n').filter(r => r.trim().startsWith('|'))
+      if (rows.length < 2) return match
+      let html = '<div style="overflow-x:auto; margin:12px 0;"><table style="width:100%; border-collapse:collapse; font-size:11px; text-align:right;">'
+      rows.forEach((row, rIdx) => {
+        if (row.includes('---')) return // separator row
+        const cells = row.split('|').map(c => c.trim()).filter((c, idx, arr) => idx > 0 && idx < arr.length - 1)
+        if (cells.length === 0) return
+        html += '<tr>'
+        cells.forEach(cell => {
+          if (rIdx === 0) {
+            html += `<th style="border:1px solid #cbd5e1; padding:6px 10px; background:#f8fafc; font-weight:700; color:#0f172a;">${cell}</th>`
+          } else {
+            html += `<td style="border:1px solid #e2e8f0; padding:6px 10px; color:#334155;">${cell}</td>`
+          }
+        })
+        html += '</tr>'
+      })
+      html += '</table></div>'
+      return html
+    })
+
+    // Convert Headings
+    text = text.replace(/^### (.*$)/gim, '<h5 style="color:#0f172a; font-weight:700; margin:14px 0 6px 0; font-size:13px;">$1</h5>')
+    text = text.replace(/^## (.*$)/gim, '<h4 style="color:#b45309; font-weight:800; margin:16px 0 8px 0; font-size:14px;">$1</h4>')
+    text = text.replace(/^# (.*$)/gim, '<h3 style="color:#b45309; font-weight:800; margin:18px 0 10px 0; font-size:15px;">$1</h3>')
+
+    // Convert Bold & Italic
+    text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    text = text.replace(/\*(.*?)\*/g, '<em>$1</em>')
+
+    // Convert Bullet lists
+    text = text.replace(/^[•*-] (.*$)/gim, '<div style="margin-right:12px; margin-bottom:4px;">• $1</div>')
+
+    // Convert Newlines to breaks
+    text = text.replace(/\n/g, '<br />')
+
+    return text
   }
 
   // ✅ تنزيل / طباعة تقرير الجلسة والحوار كـ PDF احترافي
@@ -149,6 +230,7 @@ const SessionCard = ({ session, onDelete }) => {
       { key: 'investigator', name: '6. المحقق (التدقيق ومطابقة الفرضيات وكشف التناقضات)',    round: '3_adversarial' },
       { key: 'engineer',     name: '7. المهندس الكمي (ضبط مستويات الوقف ونسب المخاطرة)',     round: '4_refinement' },
       { key: 'prince',       name: '8. الأمير (صانع القرار القياسي واعتماد الاستراتيجيات)',   round: '7_standard_decree' },
+      { key: 'advanced',     name: '9. الملك / العقل المطور (استراتيجيات التعلم التكيفي)',   round: '8_advanced_learning' }
     ]
 
     const allDialogue = []
@@ -416,7 +498,7 @@ const SessionCard = ({ session, onDelete }) => {
         ${allDialogue.length > 0 ? allDialogue.map(d => `
           <div class="debate-item">
             <div class="expert-name">👤 ${d.name}</div>
-            <div class="expert-text">${d.text}</div>
+            <div class="expert-text">${formatMarkdownToHtml(d.text)}</div>
           </div>
         `).join('') : '<div style="font-size: 12px; color: #94a3b8; padding: 10px;">لا توجد نصوص مسجلة في هذه الجلسة.</div>'}
 
@@ -527,13 +609,11 @@ const SessionCard = ({ session, onDelete }) => {
           <button
             onClick={(e) => {
               e.stopPropagation()
-              if (window.confirm('هل أنت متأكد من رغبتك في إيقاف/حذف هذا الاجتماع؟')) {
-                onDelete(session.id)
-              }
+              onDelete(session.id)
             }}
-            className="btn p-2 px-3 rounded-3 d-flex align-items-center gap-2"
-            style={{ background: 'rgba(220, 38, 38, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)' }}
-            title="حذف الجلسة"
+            className="btn p-2 px-3 rounded-3 d-flex align-items-center gap-2 transition-all hover-ruby"
+            style={{ background: 'rgba(220, 38, 38, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', cursor: 'pointer' }}
+            title="حذف الجلسة فوراً"
           >
             <Trash2 size={16} />
           </button>

@@ -70,7 +70,7 @@ const DEFAULT_EXPERTS = [
 ]
 
 const MODEL_OPTIONS = [
-  { value: 'groq/compound', label: 'Groq Compound', desc: 'مجاني وسريع جداً', badge: 'مجاني', color: '#10b981' },
+  { value: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B (Groq)', desc: 'فائق السرعة والذكاء على Groq', badge: 'Groq', color: '#10b981' },
   { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', desc: 'سريع ورخيص — أفضل قيمة', badge: 'موصى', color: '#4285f4' },
   { value: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4', desc: 'استدلال استراتيجي دقيق', badge: 'ذكي', color: '#d97706' },
   { value: 'openai/gpt-4.1-mini', label: 'GPT-4.1 Mini', desc: 'متوازن بين السعر والجودة', badge: 'متوازن', color: '#6366f1' },
@@ -193,21 +193,28 @@ const ExpertPromptsTab = () => {
 
       {/* Info Banner */}
       <div className="mb-4 p-3 d-flex align-items-center gap-3" style={{
-        background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(99,102,241,0.03))',
-        border: '1px solid rgba(99,102,241,0.2)',
+        background: 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.03))',
+        border: '1px solid rgba(16,185,129,0.25)',
         borderRadius: '14px',
-        color: '#a5b4fc'
+        color: '#6ee7b7'
       }}>
-        <Info size={18} style={{ flexShrink: 0 }} />
+        <Sparkles size={18} style={{ flexShrink: 0, color: '#10b981' }} />
         <span style={{ fontSize: '0.8rem' }}>
-          جميع الموديلات تعمل عبر <strong>OpenRouter</strong> (ماعدا Groq). اختر الموديل المناسب لكل خبير حسب الميزانية والسرعة.
+          ✅ <strong>الحفظ التلقائي الفوري مفعّل:</strong> أي موديل تختاره لأي خبير يتم حفظه وتثبيته فوراً ودائماً لقاعدة البيانات، ولن تحتاج للضغط على زر الحفظ قبل عقد الاجتماعات.
         </span>
       </div>
 
       <div className="d-flex flex-column gap-3">
         {allExperts.map((expert) => {
           const currentPrompt = expertPromptsForm[expert.id] ?? expert.defaultPrompt
-          const currentModel = expertModelsForm[expert.id] || expert.defaultModel
+          const savedInLocal = (() => {
+            try {
+              return JSON.parse(localStorage.getItem('saqr_expert_models') || '{}')[expert.id]
+            } catch (e) {
+              return null
+            }
+          })()
+          const currentModel = expertModelsForm[expert.id] || savedInLocal || 'openai/gpt-oss-120b'
           const modelInfo = getModelInfo(currentModel)
           const isExpanded = expandedCards[expert.id]
           const isEditing = editingPrompt === expert.id

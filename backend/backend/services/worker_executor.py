@@ -479,15 +479,39 @@ class WorkerExecutor:
     async def _get_market_symbols(self) -> Dict[str, list]:
         try:
             supabase = get_supabase_admin_client()
-            # جلب القائمة البيضاء
-            whitelist = supabase.table('whitelist').select('symbol').eq('market_id', self.market_id).eq('is_active', True).execute()
-            # جلب قائمة القياديين
-            leaders = supabase.table('market_leaders').select('symbol').eq('market_id', self.market_id).eq('is_active', True).execute()
             
+            # جلب القائمة البيضاء — لو market_id موجود نفلتر بيه، لو None نجيب كل العملات النشطة
+            if self.market_id:
+                whitelist = supabase.table('whitelist').select('symbol').eq('market_id', self.market_id).eq('is_active', True).execute()
+                leaders = supabase.table('market_leaders').select('symbol').eq('market_id', self.market_id).eq('is_active', True).execute()
+            else:
+                # ✅ FIX: الموظفين الناتجين من اجتماع الخبراء ممكن يكون market_id = None
+                # نجيب كل العملات النشطة في القائمة البيضاء بدون فلتر market_id
+                self.logger.info("⚠️ market_id is None — fetching ALL active whitelist symbols")
+                whitelist = supabase.table('whitelist').select('symbol').eq('is_active', True).execute()
+                leaders = supabase.table('market_leaders').select('symbol').eq('is_active', True).execute()
+            
+            raw_tradeable = [s['symbol'] for s in whitelist.data] if whitelist.data else []
+            direction = [s['symbol'] for s in leaders.data] if leaders.data else []
+            
+            # ✅ لو الموظف مخصص له سلة عملات مستهدفة محددة تم تحليلها في اجتماع الخبراء، يتداول عليها فقط
+            target_symbols = self.worker.get('user_settings', {}).get('target_symbols')
+            if target_symbols and isinstance(target_symbols, list) and len(target_symbols) > 0:
+                tradeable = [s for s in target_symbols if s in raw_tradeable] or target_symbols
+                self.logger.info(f"🎯 Worker restricted to {len(tradeable)} analyzed target symbols: {tradeable}")
+            else:
+                tradeable = raw_tradeable
+            
+            # ✅ FIX: لو القياديين فاضيين، نستخدم القياديين الافتراضيين
+            if not direction:
+                direction = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT']
+                self.logger.info(f"📡 Using default leader symbols: {direction}")
+            
+            self.logger.info(f"📋 Loaded {len(tradeable)} tradeable symbols, {len(direction)} leader symbols")
             return {
-                "tradeable": [s['symbol'] for s in whitelist.data],
-                "direction": [s['symbol'] for s in leaders.data]
+                "tradeable": tradeable,
+                "direction": direction
             }
         except Exception as e:
             self.logger.error(f"Error fetching symbols: {e}")
-            return {"tradeable": [], "direction": []}
+            return {"tradeable": [], "direction": ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT']}

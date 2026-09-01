@@ -1,5 +1,22 @@
 import { create } from 'zustand'
 import { settingService } from '../services/settingService'
+import { supabase } from '../../../services/supabase'
+
+const getSavedExpertModels = () => {
+  try {
+    const raw = localStorage.getItem('saqr_expert_models')
+    if (raw) return JSON.parse(raw)
+  } catch (e) {}
+  return {}
+}
+
+const getSavedExpertPrompts = () => {
+  try {
+    const raw = localStorage.getItem('saqr_expert_prompts')
+    if (raw) return JSON.parse(raw)
+  } catch (e) {}
+  return {}
+}
 
 export const useSettingStore = create((set, get) => ({
   profile: null,
@@ -36,8 +53,8 @@ export const useSettingStore = create((set, get) => ({
   aiForm: {
     openRouterKey: ''
   },
-  expertPromptsForm: {},
-  expertModelsForm: {},
+  expertPromptsForm: getSavedExpertPrompts(),
+  expertModelsForm: getSavedExpertModels(),
   customExpertsForm: [],
 
   /**
@@ -51,6 +68,20 @@ export const useSettingStore = create((set, get) => ({
 
       const binance = configs.find((c) => c.exchange_type === 'binance')
       const alpaca = configs.find((c) => c.exchange_type === 'alpaca')
+
+      const dbModels = data.settings?.expert_models || {}
+      const localModels = getSavedExpertModels()
+      const mergedModels = { ...localModels, ...dbModels }
+      const finalModels = Object.fromEntries(
+        Object.entries(mergedModels).map(([k, v]) => [
+          k,
+          (v === 'groq/compound' || v === 'compound') ? 'openai/gpt-oss-120b' : v
+        ])
+      )
+
+      if (Object.keys(finalModels).length > 0) {
+        try { localStorage.setItem('saqr_expert_models', JSON.stringify(finalModels)) } catch (e) {}
+      }
 
       set({
         profile: data,
@@ -77,8 +108,8 @@ export const useSettingStore = create((set, get) => ({
         aiForm: {
           openRouterKey: data.settings?.openrouter_key || ''
         },
-        expertPromptsForm: data.settings?.expert_prompts || {},
-        expertModelsForm: data.settings?.expert_models || {},
+        expertPromptsForm: { ...getSavedExpertPrompts(), ...(data.settings?.expert_prompts || {}) },
+        expertModelsForm: finalModels,
         customExpertsForm: data.settings?.custom_experts || [],
         loading: false
       })
@@ -140,43 +171,100 @@ export const useSettingStore = create((set, get) => ({
     }))
   },
 
-  setExpertPrompt: (expertId, promptText) => {
-    set((state) => ({
-      expertPromptsForm: { ...state.expertPromptsForm, [expertId]: promptText },
-      success: null
-    }))
-  },
+  setExpertPrompt: async (expertId, promptText) => {
+    const updatedPrompts = { ...get().expertPromptsForm, [expertId]: promptText }
+    set({ expertPromptsForm: updatedPrompts, success: null })
+    try {
+      localStorage.setItem('saqr_expert_prompts', JSON.stringify(updatedPrompts))
+    } catch (e) {}
 
-  setExpertModel: (expertId, modelName) => {
-    set((state) => ({
-      expertModelsForm: { ...state.expertModelsForm, [expertId]: modelName },
-      success: null
-    }))
-  },
-
-  addCustomExpert: (newExpert) => {
-    set((state) => ({
-      customExpertsForm: [...state.customExpertsForm, newExpert],
-      expertPromptsForm: { ...state.expertPromptsForm, [newExpert.id]: newExpert.defaultPrompt },
-      expertModelsForm: { ...state.expertModelsForm, [newExpert.id]: newExpert.model },
-      success: null
-    }))
-  },
-
-  deleteCustomExpert: (expertId) => {
-    set((state) => {
-      const updatedCustom = state.customExpertsForm.filter(e => e.id !== expertId)
-      const updatedPrompts = { ...state.expertPromptsForm }
-      const updatedModels = { ...state.expertModelsForm }
-      delete updatedPrompts[expertId]
-      delete updatedModels[expertId]
-      return {
-        customExpertsForm: updatedCustom,
-        expertPromptsForm: updatedPrompts,
-        expertModelsForm: updatedModels,
-        success: null
+    // Auto-save to Supabase
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.id) {
+        const currentSettings = get().profile?.settings || {}
+        await supabase.from('profiles').update({
+          settings: { ...currentSettings, expert_prompts: updatedPrompts }
+        }).eq('id', user.id)
       }
+    } catch (e) {
+      console.warn('Auto-save expert prompt failed:', e)
+    }
+  },
+
+  setExpertModel: async (expertId, modelName) => {
+    const updatedModels = { ...get().expertModelsForm, [expertId]: modelName }
+    set({ expertModelsForm: updatedModels, success: null })
+    try {
+      localStorage.setItem('saqr_expert_models', JSON.stringify(updatedModels))
+    } catch (e) {}
+
+    // Auto-save to Supabase immediately
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.id) {
+        const currentSettings = get().profile?.settings || {}
+        await supabase.from('profiles').update({
+          settings: { ...currentSettings, expert_models: updatedModels }
+        }).eq('id', user.id)
+      }
+    } catch (e) {
+      console.warn('Auto-save expert model failed:', e)
+    }
+  },
+
+  addCustomExpert: async (newExpert) => {
+    const updatedCustom = [...get().customExpertsForm, newExpert]
+    const updatedPrompts = { ...get().expertPromptsForm, [newExpert.id]: newExpert.defaultPrompt }
+    const updatedModels = { ...get().expertModelsForm, [newExpert.id]: newExpert.model }
+    set({
+      customExpertsForm: updatedCustom,
+      expertPromptsForm: updatedPrompts,
+      expertModelsForm: updatedModels,
+      success: null
     })
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.id) {
+        const currentSettings = get().profile?.settings || {}
+        await supabase.from('profiles').update({
+          settings: {
+            ...currentSettings,
+            custom_experts: updatedCustom,
+            expert_prompts: updatedPrompts,
+            expert_models: updatedModels
+          }
+        }).eq('id', user.id)
+      }
+    } catch (e) {}
+  },
+
+  deleteCustomExpert: async (expertId) => {
+    const updatedCustom = get().customExpertsForm.filter(e => e.id !== expertId)
+    const updatedPrompts = { ...get().expertPromptsForm }
+    const updatedModels = { ...get().expertModelsForm }
+    delete updatedPrompts[expertId]
+    delete updatedModels[expertId]
+    set({
+      customExpertsForm: updatedCustom,
+      expertPromptsForm: updatedPrompts,
+      expertModelsForm: updatedModels,
+      success: null
+    })
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.id) {
+        const currentSettings = get().profile?.settings || {}
+        await supabase.from('profiles').update({
+          settings: {
+            ...currentSettings,
+            custom_experts: updatedCustom,
+            expert_prompts: updatedPrompts,
+            expert_models: updatedModels
+          }
+        }).eq('id', user.id)
+      }
+    } catch (e) {}
   },
 
   /**

@@ -10,7 +10,7 @@ from backend.config import get_groq_client, ADVISOR_TIMEOUT_SECONDS, ProviderCon
 logger = logging.getLogger("AdvisorAgent")
 
 # ✅ Model الافتراضي — غيّره لو عايز
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "groq/compound")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 # بدائل سريعة:
 #   "llama-3.1-8b-instant"      → أسرع وأرخص
 #   "mixtral-8x7b-32768"        → context window أكبر
