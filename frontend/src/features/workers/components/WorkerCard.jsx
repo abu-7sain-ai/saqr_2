@@ -4,9 +4,7 @@ import {
   Shield,
   Crosshair,
   Zap,
-  DollarSign,
   Power,
-  Pause,
   Play,
   Scissors,
   Copy,
@@ -29,13 +27,13 @@ const WorkerCard = ({
   const getIcon = (owner) => {
     switch (owner) {
       case 'prince':
-        return <Shield size={24} />
+        return <Shield size={20} />
       case 'king':
-        return <Zap size={24} />
+        return <Zap size={20} />
       case 'sniper':
-        return <Crosshair size={24} />
+        return <Crosshair size={20} />
       default:
-        return <Activity size={24} />
+        return <Activity size={20} />
     }
   }
 
@@ -117,249 +115,393 @@ const WorkerCard = ({
 
   return (
     <div
-      className="glass-card p-4 h-100 transition-all hover-transform border-0 position-relative overflow-hidden"
+      className="glass-card p-4 h-100 transition-all border-0 position-relative overflow-hidden d-flex flex-column justify-content-between"
       onClick={() => onViewDetail && onViewDetail(worker)}
-      style={{ cursor: 'pointer' }}
+      style={{
+        cursor: 'pointer',
+        background: 'linear-gradient(180deg, rgba(22, 27, 34, 0.75) 0%, rgba(13, 17, 23, 0.85) 100%)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '20px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
+      }}
     >
-      {/* Background Glow */}
+      {/* Background Ambient Glow */}
       <div
         className={`position-absolute top-0 end-0 p-5 rounded-circle opacity-10 bg-${isProfit ? 'emerald' : 'ruby'}`}
-        style={{ filter: 'blur(60px)', marginRight: '-30px', marginTop: '-30px' }}
+        style={{ filter: 'blur(50px)', marginRight: '-20px', marginTop: '-20px', pointerEvents: 'none' }}
       ></div>
 
-      <div className="d-flex justify-content-between align-items-start mb-4 position-relative">
-        <div className="d-flex align-items-center gap-3">
-          <div
-            className={`bg-${getOwnerColor(worker.owner)} bg-opacity-10 p-3 rounded-4 shadow-gold-sm text-${getOwnerColor(worker.owner)}`}
-          >
-            {getIcon(worker.owner)}
-          </div>
-          <div>
-            <h4 className="m-0 text-white fw-black text-uppercase">{worker.name}</h4>
-            <div className="d-flex align-items-center flex-wrap gap-2 mt-1">
-              <span className="badge-premium x-small text-gold border-gold opacity-50">
-                #{worker.number}
-              </span>
-              <span className="small text-silver opacity-75 fw-bold">
-                {ownerLabels[worker.owner] || worker.owner} |{' '}
-                {worker.type === 'live' ? (
-                  <span className="text-gold fw-bold">حقيقي 💰</span>
-                ) : (
-                  <span className="text-silver">وهمي 📝</span>
-                )}
-              </span>
-              {worker.type === 'paper' && (
-                <button
-                  type="button"
-                  onClick={handlePromoteClick}
-                  className="btn btn-sm btn-outline-warning extra-small py-0 px-2 rounded-pill d-inline-flex align-items-center gap-1 shadow-sm"
-                  style={{ fontSize: '11px', borderColor: 'rgba(212,175,55,0.5)', color: '#d4af37', background: 'rgba(212,175,55,0.1)' }}
-                  title="تحويل مباشر إلى حساب حقيقي يتداول بأموال حقيقية"
+      <div>
+        {/* Top Header: Identity & Status */}
+        <div className="d-flex justify-content-between align-items-center mb-2 position-relative">
+          <div className="d-flex align-items-center gap-2.5 min-w-0">
+            <div
+              className={`bg-${getOwnerColor(worker.owner)} bg-opacity-15 p-2 rounded-3 text-${getOwnerColor(worker.owner)} flex-shrink-0 d-flex align-items-center justify-content-center`}
+              style={{ width: '38px', height: '38px' }}
+            >
+              {getIcon(worker.owner)}
+            </div>
+            <div className="min-w-0">
+              <div className="d-flex align-items-center gap-2">
+                <h5 className="m-0 text-white fw-black text-truncate" style={{ maxWidth: '160px' }} title={worker.name}>
+                  {worker.name}
+                </h5>
+                <span
+                  className="badge rounded-pill font-monospace flex-shrink-0"
+                  style={{
+                    background: 'rgba(212, 175, 55, 0.15)',
+                    color: '#ffd700',
+                    border: '1px solid rgba(212, 175, 55, 0.3)',
+                    fontSize: '11px',
+                    padding: '2px 8px'
+                  }}
                 >
-                  <Zap size={11} className="text-gold" />
-                  ترقية لحقيقي ⚡
-                </button>
-              )}
+                  #{worker.number}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Running Status Badge */}
+          <div className="flex-shrink-0 ms-2">
+            <div
+              className={`d-inline-flex align-items-center gap-1.5 px-2.5 py-1 rounded-pill fw-bold ${
+                worker.status === 'running' ? 'text-emerald' : 'text-ruby'
+              }`}
+              style={{
+                background: worker.status === 'running' ? 'rgba(0, 255, 157, 0.12)' : 'rgba(255, 0, 85, 0.12)',
+                border: `1px solid ${worker.status === 'running' ? 'rgba(0, 255, 157, 0.35)' : 'rgba(255, 0, 85, 0.35)'}`,
+                fontSize: '11.5px',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <span
+                className={`rounded-circle ${worker.status === 'running' ? 'bg-emerald pulse' : 'bg-ruby'}`}
+                style={{ width: '6px', height: '6px' }}
+              ></span>
+              <span>{worker.status === 'running' ? 'يعمل' : worker.status === 'stopped' ? 'متوقف' : 'مؤقت'}</span>
             </div>
           </div>
         </div>
-        <div
-          className={`badge-premium px-3 py-1 ${worker.status === 'running' ? 'text-emerald border-emerald' : 'text-ruby border-ruby opacity-50'}`}
-        >
-          <div className="d-flex align-items-center gap-2">
-            <div
-              className={`rounded-circle ${worker.status === 'running' ? 'bg-emerald pulse' : 'bg-ruby'}`}
-              style={{ width: '8px', height: '8px' }}
-            ></div>
-            {worker.status === 'running' ? 'يعمل' : worker.status === 'stopped' ? 'متوقف' : 'مؤقت'}
-          </div>
-        </div>
-      </div>
 
-      <div className="row g-3 mb-4 position-relative">
-        <div className="col-4">
-          <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
-            بيئة التداول
-          </div>
-          <div className="fw-black text-white fs-6">
+        {/* Sub-header tags: Owner | Account Type | Market Environment */}
+        <div className="d-flex align-items-center flex-wrap gap-1.5 mb-2.5">
+          <span
+            className="badge px-2 py-0.5 rounded-2 text-silver"
+            style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11px', fontWeight: 600 }}
+          >
+            {ownerLabels[worker.owner] || worker.owner}
+          </span>
+          {worker.type === 'live' ? (
+            <span
+              className="badge px-2 py-0.5 rounded-2 fw-bold"
+              style={{
+                background: 'rgba(212, 175, 55, 0.2)',
+                color: '#ffd700',
+                border: '1px solid rgba(212, 175, 55, 0.4)',
+                fontSize: '11px'
+              }}
+            >
+              💰 حقيقي
+            </span>
+          ) : (
+            <span
+              className="badge px-2 py-0.5 rounded-2 text-silver opacity-75"
+              style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11px', fontWeight: 600 }}
+            >
+              📝 وهمي
+            </span>
+          )}
+          <span
+            className="badge px-2 py-0.5 rounded-2 text-silver opacity-75"
+            style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11px', fontWeight: 600 }}
+          >
             {marketLabels[worker.market_type] || 'مستقر'}
-          </div>
-        </div>
-        <div className="col-4 text-center">
-          <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
-            الزوج / العملات
-          </div>
-          <div className="fw-black text-gold fs-6 text-truncate" title={getPairTitle()}>
-            {renderPairDisplay()}
-          </div>
-        </div>
-        <div className="col-4 text-end">
-          <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
-            الاستراتيجية
-          </div>
-          <div className="fw-black text-white fs-6 text-truncate">
-            {worker.user_settings?.strategy_source === 'chart' ? (
-              <span className="text-warning d-inline-flex align-items-center gap-1">📈 شارت مباشر</span>
-            ) : worker.user_settings?.strategy_source === 'webhook' ? (
-              <span className="text-gold d-inline-flex align-items-center gap-1"><Webhook size={14} /> Webhook</span>
-            ) : worker.user_settings?.strategy_source === 'ai_prompt' ? (
-              <span className="text-info">🪄 AI Prompt</span>
-            ) : worker.user_settings?.strategy_source === 'nocode' ? (
-              <span className="text-emerald">🎛️ No-Code</span>
-            ) : (
-              worker.user_settings?.expert_signal?.name || worker.strategy_name || 'تلقائي'
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="glass-panel p-4 rounded-4 mb-4 border-0"
-        style={{ background: 'rgba(255,255,255,0.03)' }}
-      >
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <span className="small text-silver opacity-50 fw-bold">السيولة الحالية</span>
-          <span className="fw-black text-white fs-4">
-            ${worker.current_capital?.toLocaleString()}
           </span>
         </div>
-        <div className="d-flex justify-content-between align-items-center">
-          <span className="small text-silver opacity-50 fw-bold">الأداء الإجمالي</span>
+
+        {/* Promote Banner if Paper */}
+        {worker.type === 'paper' && (
           <div
-            className={`d-flex align-items-center gap-2 fw-black fs-5 ${isProfit ? 'text-emerald' : 'text-ruby'}`}
+            onClick={handlePromoteClick}
+            className="d-flex align-items-center justify-content-between px-3 py-1.5 rounded-3 mb-3 transition-all"
+            style={{
+              background: 'linear-gradient(90deg, rgba(212, 175, 55, 0.16) 0%, rgba(212, 175, 55, 0.06) 100%)',
+              border: '1px solid rgba(212, 175, 55, 0.35)',
+              cursor: 'pointer'
+            }}
+            title="اضغط لتحويل الموظف فوراً لحساب حقيقي يتداول بأموال حقيقية"
           >
-            {isProfit ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-            {isProfit ? '+' : ''}
-            {profitPercentage}%
+            <div className="d-flex align-items-center gap-1.5 text-warning" style={{ fontSize: '11.5px', fontWeight: 700 }}>
+              <Zap size={13} className="text-gold" />
+              <span>حساب تجريبي (Paper)</span>
+            </div>
+            <span
+              className="badge rounded-pill fw-bold text-dark d-inline-flex align-items-center gap-1"
+              style={{
+                background: 'linear-gradient(135deg, #ffd700 0%, #d4af37 100%)',
+                fontSize: '10.5px',
+                padding: '3px 8px',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <Zap size={10} fill="#000" />
+              ترقية لحقيقي ⚡
+            </span>
+          </div>
+        )}
+
+        {/* Strategy & Target Pair (2-column layout to prevent any cutoffs) */}
+        <div className="row g-2 mb-3">
+          <div className="col-6">
+            <div
+              className="p-2.5 rounded-3 h-100 d-flex flex-column justify-content-center"
+              style={{
+                background: 'rgba(255, 255, 255, 0.025)',
+                border: '1px solid rgba(255, 255, 255, 0.05)'
+              }}
+            >
+              <span className="text-secondary mb-1" style={{ fontSize: '11px', fontWeight: 600 }}>
+                الاستراتيجية
+              </span>
+              <div className="fw-bold text-white text-truncate" style={{ fontSize: '12px' }} title={worker.strategy_name}>
+                {worker.user_settings?.strategy_source === 'chart' ? (
+                  <span className="text-warning d-inline-flex align-items-center gap-1">📈 شارت مباشر</span>
+                ) : worker.user_settings?.strategy_source === 'webhook' ? (
+                  <span className="text-gold d-inline-flex align-items-center gap-1"><Webhook size={12} /> Webhook</span>
+                ) : worker.user_settings?.strategy_source === 'ai_prompt' ? (
+                  <span className="text-info d-inline-flex align-items-center gap-1">🪄 ذكاء اصطناعي</span>
+                ) : worker.user_settings?.strategy_source === 'nocode' ? (
+                  <span className="text-emerald d-inline-flex align-items-center gap-1">🎛️ نو كود</span>
+                ) : (
+                  worker.user_settings?.expert_signal?.name || worker.strategy_name || 'تلقائي'
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="col-6">
+            <div
+              className="p-2.5 rounded-3 h-100 d-flex flex-column justify-content-center"
+              style={{
+                background: 'rgba(255, 255, 255, 0.025)',
+                border: '1px solid rgba(255, 255, 255, 0.05)'
+              }}
+            >
+              <span className="text-secondary mb-1" style={{ fontSize: '11px', fontWeight: 600 }}>
+                الزوج / العملات
+              </span>
+              <div
+                className="fw-bold text-gold text-truncate"
+                style={{ fontSize: '12px' }}
+                title={getPairTitle()}
+              >
+                {renderPairDisplay()}
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* Financial Highlights (Capital & Performance) */}
+        <div
+          className="p-3 rounded-4 mb-3"
+          style={{
+            background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%)',
+            border: '1px solid rgba(255, 255, 255, 0.06)'
+          }}
+        >
+          <div className="d-flex justify-content-between align-items-baseline mb-2">
+            <span className="text-secondary" style={{ fontSize: '12px', fontWeight: 600 }}>
+              السيولة الحالية
+            </span>
+            <span className="fw-black text-white font-monospace" style={{ fontSize: '20px', letterSpacing: '-0.5px' }}>
+              ${worker.current_capital?.toLocaleString() || '0.00'}
+            </span>
+          </div>
+          <div className="d-flex justify-content-between align-items-center pt-2" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+            <span className="text-secondary" style={{ fontSize: '11.5px', fontWeight: 600 }}>
+              الأداء الإجمالي
+            </span>
+            <div
+              className={`d-inline-flex align-items-center gap-1 px-2.5 py-0.5 rounded-pill fw-bold ${
+                isProfit ? 'text-emerald' : 'text-ruby'
+              }`}
+              style={{
+                background: isProfit ? 'rgba(0, 255, 157, 0.1)' : 'rgba(255, 0, 85, 0.1)',
+                fontSize: '12px'
+              }}
+            >
+              {isProfit ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+              <span>{isProfit ? '+' : ''}{profitPercentage}%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Gradual Withdrawal Progress (If active) */}
+        {worker.pending_withdrawal_amount > 0 && (
+          <div
+            className="mb-3 p-2.5 rounded-3 border border-ruby border-opacity-20"
+            style={{ background: 'rgba(255, 0, 85, 0.05)' }}
+          >
+            <div className="d-flex justify-content-between align-items-center mb-1.5">
+              <span className="extra-small text-ruby fw-black d-flex align-items-center gap-1">
+                <Scissors size={13} /> جاري التسييل التدريجي
+              </span>
+              <span className="badge text-ruby border border-ruby border-opacity-30 extra-small py-0 px-1.5 rounded-pill">
+                {(((worker.withdrawn_amount || 0) / worker.pending_withdrawal_amount) * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div
+              className="progress bg-black bg-opacity-50 overflow-hidden"
+              style={{ height: '6px', borderRadius: '3px' }}
+            >
+              <div
+                className="progress-bar bg-ruby progress-bar-striped progress-bar-animated"
+                role="progressbar"
+                style={{
+                  width: `${((worker.withdrawn_amount || 0) / worker.pending_withdrawal_amount) * 100}%`
+                }}
+              ></div>
+            </div>
+            <div className="d-flex justify-content-between mt-1">
+              <span className="extra-small text-secondary" style={{ fontSize: '10px' }}>
+                المحرر: ${worker.withdrawn_amount || 0}
+              </span>
+              <span className="extra-small text-secondary" style={{ fontSize: '10px' }}>
+                الهدف: ${worker.pending_withdrawal_amount}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {worker.pending_withdrawal_amount > 0 && (
-        <div
-          className="mb-4 p-4 rounded-4 border border-ruby border-opacity-20"
-          style={{ background: 'rgba(255, 0, 85, 0.05)' }}
-        >
-          <div className="d-flex justify-content-between align-items-center mb-3">
-            <span className="small text-ruby fw-black d-flex align-items-center gap-2">
-              <Scissors size={16} /> جاري التسييل التدريجي
-            </span>
-            <span className="badge-premium text-ruby border-ruby small">
-              {(((worker.withdrawn_amount || 0) / worker.pending_withdrawal_amount) * 100).toFixed(
-                0
-              )}
-              %
-            </span>
-          </div>
-          <div
-            className="progress bg-black bg-opacity-50 overflow-hidden"
-            style={{ height: '8px', borderRadius: '4px' }}
-          >
-            <div
-              className="progress-bar bg-ruby progress-bar-striped progress-bar-animated"
-              role="progressbar"
-              style={{
-                width: `${((worker.withdrawn_amount || 0) / worker.pending_withdrawal_amount) * 100}%`
-              }}
-            ></div>
-          </div>
-          <div className="d-flex justify-content-between mt-2">
-            <span className="x-small text-silver opacity-50">
-              المحرر: ${worker.withdrawn_amount || 0}
-            </span>
-            <span className="x-small text-silver opacity-50">
-              الهدف: ${worker.pending_withdrawal_amount}
-            </span>
-          </div>
-        </div>
-      )}
-
-      <div className="d-flex gap-3 mt-2">
+      {/* Action Buttons: Play/Pause + Square Action Icons */}
+      <div className="d-flex align-items-center gap-2 mt-auto pt-2" onClick={(e) => e.stopPropagation()}>
         {worker.status === 'running' ? (
           <button
+            type="button"
             onClick={() => onToggleStatus(worker.id, 'stopped')}
-            className="btn btn-outline-ruby flex-grow-1 py-3 fw-black d-flex align-items-center justify-content-center gap-2"
+            className="btn btn-outline-ruby flex-grow-1 fw-bold d-flex align-items-center justify-content-center gap-1.5"
+            style={{
+              height: '38px',
+              fontSize: '12.5px',
+              borderRadius: '10px',
+              whiteSpace: 'nowrap'
+            }}
           >
-            <Power size={18} /> إيقاف العمل
+            <Power size={14} /> إيقاف العمل
           </button>
         ) : (
           <button
+            type="button"
             onClick={() => onToggleStatus(worker.id, 'running')}
-            className="btn btn-outline-emerald flex-grow-1 py-3 fw-black d-flex align-items-center justify-content-center gap-2"
+            className="btn btn-outline-emerald flex-grow-1 fw-bold d-flex align-items-center justify-content-center gap-1.5"
+            style={{
+              height: '38px',
+              fontSize: '12.5px',
+              borderRadius: '10px',
+              whiteSpace: 'nowrap'
+            }}
           >
-            <Play size={18} /> بدء التشغيل
+            <Play size={14} /> بدء التشغيل
           </button>
         )}
-        <div className="d-flex gap-2">
+
+        <button
+          type="button"
+          onClick={() => onOpenWithdraw(worker)}
+          className="btn btn-outline-gold"
+          style={{
+            width: '38px',
+            height: '38px',
+            minWidth: '38px',
+            padding: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '10px'
+          }}
+          title="استقطاع سيولة / تسييل"
+          disabled={worker.pending_withdrawal_amount > 0}
+        >
+          <Scissors size={16} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onOpenClone(worker)}
+          className="btn btn-outline-gold"
+          style={{
+            width: '38px',
+            height: '38px',
+            minWidth: '38px',
+            padding: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '10px'
+          }}
+          title="استنساخ الموظف"
+        >
+          <Copy size={16} />
+        </button>
+
+        {worker.user_settings?.strategy_source === 'webhook' && (
           <button
-            onClick={() => onOpenWithdraw(worker)}
-            className="btn btn-outline-gold p-3 rounded-4"
-            title="استقطاع سيولة"
-            disabled={worker.pending_withdrawal_amount > 0}
-          >
-            <Scissors size={20} />
-          </button>
-          {worker.type === 'paper' && (
-            <button
-              onClick={handlePromoteClick}
-              className="btn btn-outline-warning p-3 rounded-4"
-              title="تحويل الموظف لحساب حقيقي يتداول بأموال حقيقية ⚡"
-            >
-              <Zap size={20} className="text-gold" />
-            </button>
-          )}
-          <button
-            onClick={() => onOpenClone(worker)}
-            className="btn btn-outline-gold p-3 rounded-4"
-            title="استنساخ الموظف"
-          >
-            <Copy size={20} />
-          </button>
-          {worker.user_settings?.strategy_source === 'webhook' && (
-            <button
-              onClick={async (e) => {
-                e.stopPropagation()
-                try {
-                  const info = await workerService.getWebhookUrl(worker.id)
-                  await navigator.clipboard.writeText(info.webhook_url)
-                  alert(`تم نسخ رابط Webhook بنجاح:\n${info.webhook_url}\n\nضع هذا الرابط في خانة Webhook URL في تنبيه TradingView.`)
-                } catch (err) {
-                  alert('فشل جلب رابط Webhook: ' + err.message)
-                }
-              }}
-              className="btn btn-outline-gold p-3 rounded-4"
-              title="نسخ رابط Webhook لـ TradingView"
-            >
-              <Webhook size={20} className="text-gold" />
-            </button>
-          )}
-          <button
-            onClick={() => {
-              if (
-                window.confirm(
-                  `هل أنت متأكد من حذف الموظف "${worker.name}"؟ لا يمكن التراجع عن هذا الإجراء.`
-                )
-              ) {
-                onDelete(worker.id)
+            type="button"
+            onClick={async (e) => {
+              e.stopPropagation()
+              try {
+                const info = await workerService.getWebhookUrl(worker.id)
+                await navigator.clipboard.writeText(info.webhook_url)
+                alert(`تم نسخ رابط Webhook بنجاح:\n${info.webhook_url}\n\nضع هذا الرابط في خانة Webhook URL في تنبيه TradingView.`)
+              } catch (err) {
+                alert('فشل جلب رابط Webhook: ' + err.message)
               }
             }}
-            className="btn btn-outline-ruby p-3 rounded-4"
-            title="حذف الموظف"
-          >
-            <Trash2 size={20} />
-          </button>
-          <button
-            onClick={() => {
-              if (window.confirm(`⚠️ تحذير: أنت على وشك تسييل كامل أرصدة الموظف "${worker.name}". هل تريد المتابعة؟`)) {
-                onToggleStatus(worker.id, 'liquidating')
-              }
+            className="btn btn-outline-gold"
+            style={{
+              width: '38px',
+              height: '38px',
+              minWidth: '38px',
+              padding: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '10px'
             }}
-            className="btn btn-outline-ruby p-3 rounded-4"
-            title="تسييل فوري للمراكز"
+            title="نسخ رابط Webhook لـ TradingView"
           >
-            <Power size={20} className="text-ruby" />
+            <Webhook size={16} className="text-gold" />
           </button>
-        </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => {
+            if (
+              window.confirm(
+                `هل أنت متأكد من حذف الموظف "${worker.name}"؟ لا يمكن التراجع عن هذا الإجراء.`
+              )
+            ) {
+              onDelete(worker.id)
+            }
+          }}
+          className="btn btn-outline-ruby"
+          style={{
+            width: '38px',
+            height: '38px',
+            minWidth: '38px',
+            padding: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '10px'
+          }}
+          title="حذف الموظف"
+        >
+          <Trash2 size={16} />
+        </button>
       </div>
     </div>
   )
