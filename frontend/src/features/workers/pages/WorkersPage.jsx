@@ -349,7 +349,7 @@ const WorkersPage = () => {
                         </div>
                         <div className="col-6">
                           <div className="p-2 rounded-3" style={{ background: 'rgba(255,255,255,0.04)' }}>
-                            <div className="extra-small text-secondary mb-1">رأس المال الحالي</div>
+                            <div className="extra-small text-secondary mb-1">السيولة المتاحة (كاش حر)</div>
                             <div className="small fw-bold" style={{ color: '#d4af37' }}>
                               ${parseFloat(selectedWorker.current_capital || 0).toFixed(2)}
                             </div>
@@ -498,10 +498,11 @@ const WorkersPage = () => {
                                 <thead>
                                   <tr className="text-secondary border-secondary">
                                     <th>الرمز</th>
-                                    <th>سعر الدخول</th>
+                                    <th>حجم الصفقة ($)</th>
+                                    <th>سعر العملة بالسوق</th>
                                     <th>سعر الخروج</th>
                                     <th>النتيجة ($)</th>
-                                    <th>حالة / سبب الخروج</th>
+                                    <th>الحالة</th>
                                     <th>تاريخ الدخول</th>
                                   </tr>
                                 </thead>
@@ -509,11 +510,17 @@ const WorkersPage = () => {
                                   {workerTradesData.trades.map((trade) => {
                                     const pnl = parseFloat(trade.result || 0)
                                     const isExit = Boolean(trade.exit_at)
+                                    const entryPrice = parseFloat(trade.entry_price || 0)
+                                    const amountActual = parseFloat(trade.amount_actual || 0)
+                                    const tradeValue = entryPrice * amountActual
                                     return (
                                       <tr key={trade.id}>
                                         <td className="fw-bold text-warning">{trade.pair}</td>
-                                        <td>${parseFloat(trade.entry_price || 0).toFixed(4)}</td>
-                                        <td>{trade.exit_price ? `$${parseFloat(trade.exit_price).toFixed(4)}` : <span className="badge bg-primary">مفتوحة</span>}</td>
+                                        <td className="fw-bold text-white">
+                                          ${tradeValue > 0 ? tradeValue.toFixed(2) : '100.00'}
+                                        </td>
+                                        <td>${entryPrice.toFixed(2)}</td>
+                                        <td>{trade.exit_price ? `$${parseFloat(trade.exit_price).toFixed(2)}` : <span className="badge bg-primary">مفتوحة</span>}</td>
                                         <td className={`fw-bold ${!isExit ? 'text-secondary' : pnl >= 0 ? 'text-success' : 'text-danger'}`}>
                                           {!isExit ? '-' : `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`}
                                         </td>
