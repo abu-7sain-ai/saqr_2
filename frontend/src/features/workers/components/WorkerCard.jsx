@@ -1,8 +1,5 @@
 import React from 'react'
 import {
-  Activity,
-  Shield,
-  Crosshair,
   Zap,
   Power,
   Play,
@@ -24,41 +21,10 @@ const WorkerCard = ({
   onPromote,
   onViewDetail
 }) => {
-  const getIcon = (owner) => {
-    switch (owner) {
-      case 'prince':
-        return <Shield size={20} />
-      case 'king':
-        return <Zap size={20} />
-      case 'sniper':
-        return <Crosshair size={20} />
-      default:
-        return <Activity size={20} />
-    }
-  }
-
-  const getOwnerColor = (owner) => {
-    switch (owner) {
-      case 'prince':
-        return 'info'
-      case 'king':
-        return 'gold'
-      case 'sniper':
-        return 'ruby'
-      default:
-        return 'silver'
-    }
-  }
-
   const profitLoss = (worker.current_capital || 0) - (worker.starting_capital || 0)
   const profitPercentage =
     worker.starting_capital > 0 ? ((profitLoss / worker.starting_capital) * 100).toFixed(2) : '0.00'
   const isProfit = profitLoss >= 0
-
-  const typeLabels = {
-    paper: 'وهمي',
-    live: 'حقيقي'
-  }
 
   const ownerLabels = {
     prince: 'عادي',
@@ -132,34 +98,24 @@ const WorkerCard = ({
       ></div>
 
       <div>
-        {/* Top Header: Identity & Status */}
-        <div className="d-flex justify-content-between align-items-center mb-2 position-relative">
-          <div className="d-flex align-items-center gap-2.5 min-w-0">
-            <div
-              className={`bg-${getOwnerColor(worker.owner)} bg-opacity-15 p-2 rounded-3 text-${getOwnerColor(worker.owner)} flex-shrink-0 d-flex align-items-center justify-content-center`}
-              style={{ width: '38px', height: '38px' }}
+        {/* Top Header: Name, Number & Status (No blue box!) */}
+        <div className="d-flex justify-content-between align-items-center mb-2.5 position-relative">
+          <div className="d-flex align-items-center gap-2 min-w-0">
+            <h5 className="m-0 text-white fw-black text-truncate" style={{ fontSize: '18px', maxWidth: '200px' }} title={worker.name}>
+              {worker.name}
+            </h5>
+            <span
+              className="badge rounded-pill font-monospace flex-shrink-0"
+              style={{
+                background: 'rgba(212, 175, 55, 0.15)',
+                color: '#ffd700',
+                border: '1px solid rgba(212, 175, 55, 0.35)',
+                fontSize: '11px',
+                padding: '2px 8px'
+              }}
             >
-              {getIcon(worker.owner)}
-            </div>
-            <div className="min-w-0">
-              <div className="d-flex align-items-center gap-2">
-                <h5 className="m-0 text-white fw-black text-truncate" style={{ maxWidth: '160px' }} title={worker.name}>
-                  {worker.name}
-                </h5>
-                <span
-                  className="badge rounded-pill font-monospace flex-shrink-0"
-                  style={{
-                    background: 'rgba(212, 175, 55, 0.15)',
-                    color: '#ffd700',
-                    border: '1px solid rgba(212, 175, 55, 0.3)',
-                    fontSize: '11px',
-                    padding: '2px 8px'
-                  }}
-                >
-                  #{worker.number}
-                </span>
-              </div>
-            </div>
+              #{worker.number}
+            </span>
           </div>
 
           {/* Running Status Badge */}
@@ -185,36 +141,36 @@ const WorkerCard = ({
         </div>
 
         {/* Sub-header tags: Owner | Account Type | Market Environment */}
-        <div className="d-flex align-items-center flex-wrap gap-1.5 mb-2.5">
+        <div className="d-flex align-items-center gap-2 mb-3">
           <span
-            className="badge px-2 py-0.5 rounded-2 text-silver"
-            style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11px', fontWeight: 600 }}
+            className="px-2.5 py-0.5 rounded-2 text-silver"
+            style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11.5px', fontWeight: 600 }}
           >
             {ownerLabels[worker.owner] || worker.owner}
           </span>
           {worker.type === 'live' ? (
             <span
-              className="badge px-2 py-0.5 rounded-2 fw-bold"
+              className="px-2.5 py-0.5 rounded-2 fw-bold"
               style={{
                 background: 'rgba(212, 175, 55, 0.2)',
                 color: '#ffd700',
                 border: '1px solid rgba(212, 175, 55, 0.4)',
-                fontSize: '11px'
+                fontSize: '11.5px'
               }}
             >
               💰 حقيقي
             </span>
           ) : (
             <span
-              className="badge px-2 py-0.5 rounded-2 text-silver opacity-75"
-              style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11px', fontWeight: 600 }}
+              className="px-2.5 py-0.5 rounded-2 text-silver opacity-75"
+              style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11.5px', fontWeight: 600 }}
             >
               📝 وهمي
             </span>
           )}
           <span
-            className="badge px-2 py-0.5 rounded-2 text-silver opacity-75"
-            style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11px', fontWeight: 600 }}
+            className="px-2.5 py-0.5 rounded-2 text-silver opacity-75"
+            style={{ background: 'rgba(255, 255, 255, 0.05)', fontSize: '11.5px', fontWeight: 600 }}
           >
             {marketLabels[worker.market_type] || 'مستقر'}
           </span>
@@ -224,28 +180,27 @@ const WorkerCard = ({
         {worker.type === 'paper' && (
           <div
             onClick={handlePromoteClick}
-            className="d-flex align-items-center justify-content-between px-3 py-1.5 rounded-3 mb-3 transition-all"
+            className="d-flex align-items-center justify-content-between px-3 py-2 rounded-3 mb-3 transition-all"
+            dir="rtl"
             style={{
-              background: 'linear-gradient(90deg, rgba(212, 175, 55, 0.16) 0%, rgba(212, 175, 55, 0.06) 100%)',
-              border: '1px solid rgba(212, 175, 55, 0.35)',
+              background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.15) 0%, rgba(202, 138, 4, 0.06) 100%)',
+              border: '1px solid rgba(234, 179, 8, 0.35)',
               cursor: 'pointer'
             }}
             title="اضغط لتحويل الموظف فوراً لحساب حقيقي يتداول بأموال حقيقية"
           >
-            <div className="d-flex align-items-center gap-1.5 text-warning" style={{ fontSize: '11.5px', fontWeight: 700 }}>
-              <Zap size={13} className="text-gold" />
-              <span>حساب تجريبي (Paper)</span>
+            <div className="d-flex align-items-center gap-1.5 text-warning fw-bold" style={{ fontSize: '12px' }}>
+              <span>⚡</span>
+              <span>حساب تجريبي</span>
             </div>
             <span
-              className="badge rounded-pill fw-bold text-dark d-inline-flex align-items-center gap-1"
+              className="badge rounded-pill fw-bold text-dark px-2.5 py-1 d-inline-flex align-items-center gap-1"
               style={{
-                background: 'linear-gradient(135deg, #ffd700 0%, #d4af37 100%)',
-                fontSize: '10.5px',
-                padding: '3px 8px',
+                background: 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)',
+                fontSize: '11px',
                 whiteSpace: 'nowrap'
               }}
             >
-              <Zap size={10} fill="#000" />
               ترقية لحقيقي ⚡
             </span>
           </div>
@@ -257,14 +212,14 @@ const WorkerCard = ({
             <div
               className="p-2.5 rounded-3 h-100 d-flex flex-column justify-content-center"
               style={{
-                background: 'rgba(255, 255, 255, 0.025)',
-                border: '1px solid rgba(255, 255, 255, 0.05)'
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.06)'
               }}
             >
               <span className="text-secondary mb-1" style={{ fontSize: '11px', fontWeight: 600 }}>
                 الاستراتيجية
               </span>
-              <div className="fw-bold text-white text-truncate" style={{ fontSize: '12px' }} title={worker.strategy_name}>
+              <div className="fw-bold text-white text-truncate" style={{ fontSize: '12.5px' }} title={worker.strategy_name}>
                 {worker.user_settings?.strategy_source === 'chart' ? (
                   <span className="text-warning d-inline-flex align-items-center gap-1">📈 شارت مباشر</span>
                 ) : worker.user_settings?.strategy_source === 'webhook' ? (
@@ -284,8 +239,8 @@ const WorkerCard = ({
             <div
               className="p-2.5 rounded-3 h-100 d-flex flex-column justify-content-center"
               style={{
-                background: 'rgba(255, 255, 255, 0.025)',
-                border: '1px solid rgba(255, 255, 255, 0.05)'
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.06)'
               }}
             >
               <span className="text-secondary mb-1" style={{ fontSize: '11px', fontWeight: 600 }}>
@@ -293,7 +248,7 @@ const WorkerCard = ({
               </span>
               <div
                 className="fw-bold text-gold text-truncate"
-                style={{ fontSize: '12px' }}
+                style={{ fontSize: '12.5px' }}
                 title={getPairTitle()}
               >
                 {renderPairDisplay()}
@@ -304,9 +259,9 @@ const WorkerCard = ({
 
         {/* Financial Highlights (Capital & Performance) */}
         <div
-          className="p-3 rounded-4 mb-3"
+          className="p-3 rounded-3 mb-3"
           style={{
-            background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%)',
+            background: 'rgba(0, 0, 0, 0.25)',
             border: '1px solid rgba(255, 255, 255, 0.06)'
           }}
         >
@@ -381,12 +336,15 @@ const WorkerCard = ({
           <button
             type="button"
             onClick={() => onToggleStatus(worker.id, 'stopped')}
-            className="btn btn-outline-ruby flex-grow-1 fw-bold d-flex align-items-center justify-content-center gap-1.5"
+            className="btn flex-grow-1 fw-bold d-flex align-items-center justify-content-center gap-1.5"
             style={{
               height: '38px',
               fontSize: '12.5px',
               borderRadius: '10px',
-              whiteSpace: 'nowrap'
+              whiteSpace: 'nowrap',
+              background: 'rgba(255, 0, 85, 0.1)',
+              border: '1px solid rgba(255, 0, 85, 0.35)',
+              color: '#ff3366'
             }}
           >
             <Power size={14} /> إيقاف العمل
@@ -395,12 +353,15 @@ const WorkerCard = ({
           <button
             type="button"
             onClick={() => onToggleStatus(worker.id, 'running')}
-            className="btn btn-outline-emerald flex-grow-1 fw-bold d-flex align-items-center justify-content-center gap-1.5"
+            className="btn flex-grow-1 fw-bold d-flex align-items-center justify-content-center gap-1.5"
             style={{
               height: '38px',
               fontSize: '12.5px',
               borderRadius: '10px',
-              whiteSpace: 'nowrap'
+              whiteSpace: 'nowrap',
+              background: 'rgba(0, 255, 157, 0.1)',
+              border: '1px solid rgba(0, 255, 157, 0.35)',
+              color: '#00ff9d'
             }}
           >
             <Play size={14} /> بدء التشغيل
@@ -410,7 +371,7 @@ const WorkerCard = ({
         <button
           type="button"
           onClick={() => onOpenWithdraw(worker)}
-          className="btn btn-outline-gold"
+          className="btn"
           style={{
             width: '38px',
             height: '38px',
@@ -419,18 +380,21 @@ const WorkerCard = ({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            borderRadius: '10px'
+            borderRadius: '10px',
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid rgba(212, 175, 55, 0.35)',
+            color: '#d4af37'
           }}
           title="استقطاع سيولة / تسييل"
           disabled={worker.pending_withdrawal_amount > 0}
         >
-          <Scissors size={16} />
+          <Scissors size={15} />
         </button>
 
         <button
           type="button"
           onClick={() => onOpenClone(worker)}
-          className="btn btn-outline-gold"
+          className="btn"
           style={{
             width: '38px',
             height: '38px',
@@ -439,11 +403,14 @@ const WorkerCard = ({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            borderRadius: '10px'
+            borderRadius: '10px',
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid rgba(212, 175, 55, 0.35)',
+            color: '#d4af37'
           }}
           title="استنساخ الموظف"
         >
-          <Copy size={16} />
+          <Copy size={15} />
         </button>
 
         {worker.user_settings?.strategy_source === 'webhook' && (
@@ -459,7 +426,7 @@ const WorkerCard = ({
                 alert('فشل جلب رابط Webhook: ' + err.message)
               }
             }}
-            className="btn btn-outline-gold"
+            className="btn"
             style={{
               width: '38px',
               height: '38px',
@@ -468,11 +435,14 @@ const WorkerCard = ({
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              borderRadius: '10px'
+              borderRadius: '10px',
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(212, 175, 55, 0.35)',
+              color: '#d4af37'
             }}
             title="نسخ رابط Webhook لـ TradingView"
           >
-            <Webhook size={16} className="text-gold" />
+            <Webhook size={15} />
           </button>
         )}
 
@@ -487,7 +457,7 @@ const WorkerCard = ({
               onDelete(worker.id)
             }
           }}
-          className="btn btn-outline-ruby"
+          className="btn"
           style={{
             width: '38px',
             height: '38px',
@@ -496,11 +466,14 @@ const WorkerCard = ({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            borderRadius: '10px'
+            borderRadius: '10px',
+            background: 'rgba(255, 0, 85, 0.05)',
+            border: '1px solid rgba(255, 0, 85, 0.35)',
+            color: '#ff3366'
           }}
           title="حذف الموظف"
         >
-          <Trash2 size={16} />
+          <Trash2 size={15} />
         </button>
       </div>
     </div>
