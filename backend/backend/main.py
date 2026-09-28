@@ -1,6 +1,6 @@
 """
 Saqr (الصقر) — FastAPI Entry Point
-Phase 3: Production Core
+Phase 3: Production Core (Reload Triggered)
 """
 import logging
 import os
@@ -11,6 +11,7 @@ try:
 except ImportError:
     psutil = None
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Literal, List, Dict, Any
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +42,7 @@ app = FastAPI(
     version="0.2.0",
 )
 
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,15 +54,27 @@ app.add_middleware(
 # --- Models ---
 class ConnectionTestRequest(BaseModel):
     exchange: str
-    key: str
-    secret: str
-    is_paper: bool = False
+    api_key: str
+    api_secret: str
+    passphrase: str | None = None
+    is_paper: bool = True
 
 class SyncMarketRequest(BaseModel):
     market_id: str
 
 class AdvisorChatRequest(BaseModel):
-    message: str = Field(..., min_length=1)
+    message: str
+    history: list[dict] = []
+    agent_id: str | None = None
+    context_type: str | None = None
+    context_id: str | None = None
+
+class AdvisorChatResponse(BaseModel):
+    reply: str
+    agent_id: str
+    agent_name: str
+    tokens_used: int
+    execution_time_ms: float
 
 class AdvisorChatError(BaseModel):
     error_code: str
@@ -75,6 +89,29 @@ class CloneWorkerRequest(BaseModel):
     settings: dict
     session_id: str | None = None
     expert_signal: dict | None = None
+
+class CreateStandaloneWorkerRequest(BaseModel):
+    name: str
+    strategy_source: Literal["webhook", "ai_prompt", "nocode", "chart"] = "chart"
+    type: Literal["paper", "live"] = "paper"
+    market_type: Literal["stable", "volatile"] = "stable"
+    owner: Literal["prince", "king", "sniper"] = "prince"
+    starting_capital: float = 1000.0
+    pair: Optional[str] = "BTC/USDT"
+    pairs: Optional[List[str]] = None
+    settings: Optional[dict] = None
+    strategy_config: Optional[dict] = None
+    buddy_id: Optional[str] = None
+
+class ParsePromptRequest(BaseModel):
+    prompt: str
+
+class WebhookSignalRequest(BaseModel):
+    action: str  # "buy", "sell", "close", "long", "short"
+    symbol: Optional[str] = None
+    price: Optional[float] = None
+    secret_token: Optional[str] = None
+    comment: Optional[str] = None
 
 # --- Health Endpoints ---
 @app.get("/health", tags=["Health"])
@@ -257,16 +294,32 @@ async def get_advisor_balance():
         logger.error(f"Failed to fetch Advisor balance: {e}")
         return {"total_credits": 0}
 
+_workers_cache = {"data": None, "ts": 0}
+
 @app.get("/api/v1/workers", tags=["Workers"])
 async def get_all_workers():
-    """Fetch all workers directly via admin client to ensure 100% visibility."""
+    """Fetch all workers with in-memory cache for fast repeated loads."""
+    import time as _time
+    now = _time.time()
+    # Cache for 5 seconds to avoid hammering Supabase on page refreshes
+    if _workers_cache["data"] is not None and (now - _workers_cache["ts"]) < 5:
+        return _workers_cache["data"]
     try:
         supabase = get_supabase_admin_client()
-        res = supabase.table('workers').select('*').order('created_at', desc=True).execute()
-        return res.data or []
+        res = await asyncio.to_thread(
+            lambda: supabase.table('workers')
+                .select('id,number,name,type,status,owner,market_type,pair,strategy_name,user_settings,starting_capital,current_capital,created_at,paired_with,kitchen_session_id,pending_withdrawal_amount')
+                .order('created_at', desc=True)
+                .execute()
+        )
+        result = res.data or []
+        _workers_cache["data"] = result
+        _workers_cache["ts"] = now
+        return result
     except Exception as e:
         logger.error(f"Failed to fetch workers: {e}")
-        return []
+        return _workers_cache["data"] or []
+
 
 @app.patch("/api/v1/workers/{worker_id}/status", tags=["Workers"])
 async def update_worker_status(worker_id: str, payload: dict):
@@ -283,10 +336,54 @@ async def update_worker_status(worker_id: str, payload: dict):
 
 @app.patch("/api/v1/workers/{worker_id}/promote", tags=["Workers"])
 async def promote_worker(worker_id: str):
+    """تحويل الموظف من حساب وهمي إلى حساب حقيقي يتداول بأموال حقيقية"""
     try:
         supabase = get_supabase_admin_client()
-        res = supabase.table('workers').update({"type": "live"}).eq('id', worker_id).execute()
-        return {"success": True, "data": res.data}
+
+        # 1. Fetch current worker details
+        res_current = supabase.table('workers').select('*').eq('id', worker_id).execute()
+        if not res_current.data:
+            raise HTTPException(status_code=404, detail="الموظف غير موجود")
+
+        worker_data = res_current.data[0]
+        current_settings = worker_data.get('user_settings') or {}
+        current_settings['workerType'] = 'live'
+
+        update_payload = {
+            "type": "live",
+            "user_settings": current_settings
+        }
+
+        # التأكد من ربط الموظف بالسوق الحقيقي إذا لم يكن مربوطاً
+        if not worker_data.get('market_id'):
+            m_res = supabase.table('markets').select('id').execute()
+            if m_res.data:
+                update_payload['market_id'] = m_res.data[0]['id']
+
+        res = supabase.table('workers').update(update_payload).eq('id', worker_id).execute()
+
+        # 2. Update in-memory WorkerEngine executor if running
+        from backend.services.worker_engine import WorkerEngine
+        worker_id_str = str(worker_id)
+        if worker_id_str in WorkerEngine._executor_pool:
+            executor = WorkerEngine._executor_pool[worker_id_str]
+            executor.worker['type'] = 'live'
+            executor.worker['user_settings'] = current_settings
+            if update_payload.get('market_id'):
+                executor.worker['market_id'] = update_payload['market_id']
+                executor.market_id = update_payload['market_id']
+            executor.is_paper = False
+            await executor._initialize_market()
+            logger.info(f"🚀 In-memory executor promoted to LIVE for worker {worker_data.get('name')}")
+
+        # 3. Invalidate workers cache so UI reloads fast
+        global _workers_cache
+        _workers_cache["data"] = None
+        _workers_cache["ts"] = 0
+
+        return {"success": True, "message": "تم ترقية الموظف لحساب حقيقي بنجاح", "data": res.data}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to promote worker: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -372,6 +469,275 @@ async def clone_worker(req: CloneWorkerRequest):
         return {"worker_id": new_worker['id'], "name": worker_name, "status": "running"}
     except Exception as e:
         logger.error(f"Worker cloning failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/workers/create", tags=["Workers"])
+async def create_standalone_worker(req: CreateStandaloneWorkerRequest, request: Request):
+    """Create a standalone worker using Webhook, AI Prompt, or No-Code Strategy"""
+    try:
+        user_id = os.environ.get("SUPER_OWNER_ID")
+        if not user_id:
+            global _cached_owner_user_id
+            if '_cached_owner_user_id' in globals() and _cached_owner_user_id:
+                user_id = _cached_owner_user_id
+            else:
+                try:
+                    db = Database()
+                    settings = db.get_telegram_settings()
+                    user_id = settings['user_id'] if settings else None
+                    if user_id:
+                        _cached_owner_user_id = user_id
+                except Exception:
+                    user_id = None
+
+        if not user_id:
+            user_id = "00000000-0000-0000-0000-000000000001"
+
+        db = Database()
+
+        # Determine target symbols list and display pair
+        symbols_list = []
+        if req.pairs and isinstance(req.pairs, list):
+            symbols_list = [p.strip() for p in req.pairs if p and p.strip()]
+        elif req.pair:
+            symbols_list = [p.strip() for p in req.pair.split(',') if p and p.strip()]
+        
+        if not symbols_list:
+            symbols_list = ["BTC/USDT"]
+
+        display_pair = symbols_list[0] if len(symbols_list) == 1 else ", ".join(symbols_list)
+
+        merged_settings = dict(req.settings or {})
+        merged_settings['strategy_source'] = req.strategy_source
+        merged_settings['workerType'] = req.type
+        merged_settings['marketType'] = req.market_type
+        merged_settings['symbol'] = symbols_list[0] if len(symbols_list) == 1 else "MULTI"
+        merged_settings['symbols'] = symbols_list
+        merged_settings['target_symbols'] = symbols_list
+        merged_settings['portfolioValue'] = req.starting_capital
+
+        strat_config = req.strategy_config or {}
+        secret_token = None
+
+        if req.strategy_source == "webhook":
+            import secrets
+            secret_token = strat_config.get('secret_token') or secrets.token_hex(16)
+            merged_settings['secret_token'] = secret_token
+            strategy_name = "TradingView Webhook"
+
+        elif req.strategy_source == "ai_prompt":
+            prompt_text = strat_config.get('prompt', '')
+            merged_settings['ai_prompt'] = prompt_text
+            from backend.strategies.ai_prompt_strategy import AIPromptStrategy
+            parsed_rules = await AIPromptStrategy.parse_prompt_async(prompt_text)
+            merged_settings['parsed_rules'] = parsed_rules
+            coin_tag = f"({len(symbols_list)} عملات)" if len(symbols_list) > 1 else f"({symbols_list[0]})"
+            strategy_name = f"AI {coin_tag}: {prompt_text[:25]}..." if len(prompt_text) > 25 else f"AI {coin_tag}: {prompt_text}"
+
+        elif req.strategy_source == "nocode":
+            nocode_rules = strat_config.get('rules', {})
+            merged_settings['nocode_rules'] = nocode_rules
+            coin_tag = f"({len(symbols_list)} عملات)" if len(symbols_list) > 1 else f"({symbols_list[0]})"
+            strategy_name = f"No-Code Builder {coin_tag}"
+
+        elif req.strategy_source == "chart":
+            chart_mode = strat_config.get('chart_mode', 'dip_rebound')
+            merged_settings['chart_mode'] = chart_mode
+            merged_settings['timeframe'] = strat_config.get('timeframe', '60')
+            if chart_mode == 'dip_rebound':
+                merged_settings['nocode_rules'] = {
+                    "entry_rules": {"rsi_condition": "below", "rsi_value": 35, "macd_condition": "cross_up"},
+                    "exit_rules": {"rsi_condition": "above", "rsi_value": 70, "tp_pct": merged_settings.get('tpValue', 3.0), "sl_pct": merged_settings.get('slValue', 1.5)}
+                }
+                strategy_name = f"شارت مباشر: {display_pair} (ارتداد القاع)"
+            elif chart_mode == 'breakout':
+                merged_settings['nocode_rules'] = {
+                    "entry_rules": {"ema_condition": "above", "ema_period": 50, "macd_condition": "above_signal"},
+                    "exit_rules": {"macd_condition": "cross_down", "tp_pct": merged_settings.get('tpValue', 4.0), "sl_pct": merged_settings.get('slValue', 2.0)}
+                }
+                strategy_name = f"شارت مباشر: {display_pair} (اختراق وترند)"
+            else:
+                merged_settings['nocode_rules'] = {
+                    "entry_rules": {"rsi_condition": "below", "rsi_value": 40, "bb_condition": "touch_lower"},
+                    "exit_rules": {"bb_condition": "touch_upper", "tp_pct": merged_settings.get('tpValue', 1.5), "sl_pct": merged_settings.get('slValue', 0.8)}
+                }
+                strategy_name = f"شارت مباشر: {display_pair} (اسكالبينج سريع)"
+
+        else:
+            strategy_name = "مخصص"
+
+        # الربط بالسوق النشط في النظام (مثل باينانس) لتمكين التداول الحقيقي المباشر
+        active_market_id = None
+        try:
+            supabase = get_supabase_admin_client()
+            m_res = supabase.table('markets').select('id').execute()
+            if m_res.data:
+                active_market_id = m_res.data[0]['id']
+        except Exception as me:
+            logger.warning(f"Could not link active market to worker: {me}")
+
+        worker_data = {
+            "user_id":          user_id,
+            "name":             req.name,
+            "type":             req.type.lower() if req.type.lower() in ('paper', 'live') else 'paper',
+            "status":           "running",
+            "owner":            req.owner.lower() if req.owner.lower() in ('prince', 'king', 'sniper') else 'prince',
+            "market_type":      req.market_type.lower() if req.market_type.lower() in ('stable', 'volatile') else 'stable',
+            "pair":             display_pair,
+            "strategy_name":    strategy_name,
+            "user_settings":    merged_settings,
+            "starting_capital": float(req.starting_capital),
+            "current_capital":  float(req.starting_capital),
+            "paired_with":      req.buddy_id or None,
+            "market_id":        active_market_id,
+        }
+
+        new_worker = None
+        try:
+            new_worker = await asyncio.to_thread(db.clone_worker_direct, worker_data)
+        except Exception as dbe:
+            logger.warning(f"DB persistence error (falling back to memory): {dbe}")
+
+        if not new_worker:
+            worker_id = str(uuid.uuid4())
+            new_worker = {
+                **worker_data,
+                "id": worker_id,
+                "number": 1,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            worker_id = new_worker['id']
+        base_url = str(request.base_url).rstrip('/')
+        webhook_url = f"{base_url}/api/v1/workers/{worker_id}/webhook"
+
+        return {
+            "status": "success",
+            "worker": new_worker,
+            "webhook_url": webhook_url if req.strategy_source == "webhook" else None,
+            "secret_token": secret_token
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"create_standalone_worker failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/workers/parse-prompt", tags=["Workers"])
+async def api_parse_prompt(req: ParsePromptRequest):
+    """تحليل وصف الاستراتيجية النصي واستخراج القواعد الفنية عبر الذكاء الاصطناعي"""
+    try:
+        from backend.strategies.ai_prompt_strategy import AIPromptStrategy
+        rules = await AIPromptStrategy.parse_prompt_async(req.prompt)
+        return {"status": "success", "rules": rules}
+    except Exception as e:
+        logger.error(f"api_parse_prompt failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/workers/{worker_id}/webhook", tags=["Workers"])
+async def receive_webhook_signal(worker_id: str, req: WebhookSignalRequest):
+    """استقبال إشارات TradingView أو إشارات خارجية فورية"""
+    try:
+        worker = None
+        try:
+            supabase = get_supabase_admin_client()
+            w_resp = supabase.table('workers').select('*').eq('id', worker_id).execute()
+            if w_resp.data:
+                worker = w_resp.data[0]
+        except Exception as e:
+            logger.warning(f"Could not fetch worker from DB: {e}")
+        
+        if not worker:
+            # افتراضي للموظف إذا تعذر الاتصال بـ Supabase
+            worker = {
+                'id': worker_id,
+                'name': 'موظف Webhook',
+                'user_settings': {'strategy_source': 'webhook', 'workerType': 'paper'},
+                'type': 'paper',
+                'market_type': 'stable',
+                'user_id': '00000000-0000-0000-0000-000000000001',
+                'current_capital': 1000.0,
+                'starting_capital': 1000.0
+            }
+        
+        user_settings = worker.get('user_settings', {})
+        
+        # تحقق من secret_token لو محدد ومفعل
+        configured_token = user_settings.get('secret_token')
+        if configured_token and req.secret_token and configured_token != req.secret_token:
+            raise HTTPException(status_code=401, detail="Invalid webhook secret token")
+
+        executor = await WorkerEngine.get_or_create_executor(worker_id)
+        if not executor:
+            # Fallback executor directly initialized
+            from backend.services.worker_executor import WorkerExecutor
+            executor = WorkerExecutor(worker)
+            WorkerEngine._executor_pool[str(worker_id)] = executor
+
+        payload = req.model_dump()
+        result = await executor.handle_webhook_signal(payload)
+        
+        try:
+            db = Database()
+            db.log_activity(
+                worker['user_id'],
+                "webhook_signal_received",
+                f"إشارة Webhook للموظف {worker['name']}: {req.action} {req.symbol or ''}",
+                {"result": result, "payload": payload}
+            )
+        except Exception as le:
+            logger.warning(f"Could not log webhook activity: {le}")
+        
+        return {"status": "success", "execution": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error handling webhook signal for {worker_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/workers/{worker_id}/webhook-url", tags=["Workers"])
+async def get_worker_webhook_url(worker_id: str, request: Request):
+    """جلب رابط Webhook للموظف مع نموذج إعداد تنبيه TradingView"""
+    try:
+        worker = None
+        try:
+            supabase = get_supabase_admin_client()
+            w_resp = supabase.table('workers').select('*').eq('id', worker_id).execute()
+            if w_resp.data:
+                worker = w_resp.data[0]
+        except Exception as e:
+            logger.warning(f"Could not fetch worker from DB: {e}")
+
+        if not worker:
+            worker = {'id': worker_id, 'name': 'موظف Webhook', 'user_settings': {}}
+        
+        user_settings = worker.get('user_settings', {})
+        secret_token = user_settings.get('secret_token', '')
+
+        base_url = str(request.base_url).rstrip('/')
+        webhook_url = f"{base_url}/api/v1/workers/{worker_id}/webhook"
+
+        sample_alert_json = {
+            "action": "buy",
+            "symbol": "{{ticker}}",
+            "price": 12345.67,
+            "comment": "TradingView Alert: {{strategy.order.comment}}"
+        }
+        if secret_token:
+            sample_alert_json["secret_token"] = secret_token
+
+        return {
+            "worker_id": worker_id,
+            "worker_name": worker['name'],
+            "webhook_url": webhook_url,
+            "secret_token": secret_token,
+            "sample_payload": sample_alert_json,
+            "tradingview_instructions": "انسخ رابط الـ Webhook وضعه في خانة Webhook URL في تنبيه TradingView. وفي خانة الرسالة (Message) ضع صيغة الـ JSON أعلاه."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_worker_webhook_url failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/workers/{worker_id}/trades", tags=["Workers"])

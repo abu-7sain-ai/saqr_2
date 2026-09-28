@@ -12,8 +12,10 @@ import {
   Copy,
   TrendingUp,
   TrendingDown,
-  Trash2
+  Trash2,
+  Webhook
 } from 'lucide-react'
+import { workerService } from '../services/workerService'
 
 const WorkerCard = ({
   worker,
@@ -71,6 +73,48 @@ const WorkerCard = ({
     volatile: 'متوتر'
   }
 
+  const getPairTitle = () => {
+    const symbols = worker.user_settings?.symbols || worker.user_settings?.target_symbols
+    if (Array.isArray(symbols) && symbols.length > 0) return symbols.join(', ')
+    return worker.pair || worker.user_settings?.symbol || 'BTC/USDT'
+  }
+
+  const renderPairDisplay = () => {
+    const symbols = worker.user_settings?.symbols || worker.user_settings?.target_symbols
+    if (Array.isArray(symbols) && symbols.length > 1) {
+      const preview = symbols.slice(0, 2).map((s) => s.split('/')[0]).join(', ')
+      return `${symbols.length} عملات (${preview}${symbols.length > 2 ? '...' : ''})`
+    }
+    const rawPair = worker.pair || worker.user_settings?.symbol || 'BTC/USDT'
+    if (typeof rawPair === 'string' && rawPair.includes(',')) {
+      const list = rawPair.split(',').map((s) => s.trim())
+      const preview = list.slice(0, 2).map((s) => s.split('/')[0]).join(', ')
+      return `${list.length} عملات (${preview}${list.length > 2 ? '...' : ''})`
+    }
+    if (rawPair === 'ALL' || worker.user_settings?.symbol === 'ALL') {
+      return 'الكل (القائمة البيضاء)'
+    }
+    return rawPair
+  }
+
+  const handlePromoteClick = async (e) => {
+    e?.stopPropagation()
+    const confirmed = window.confirm(
+      `هل أنت متأكد من تحويل الموظف "${worker.name}" إلى حساب حقيقي؟\nسيبدأ الموظف بالتداول بأموال حقيقية على المنصة وفق نفس الإعدادات.`
+    )
+    if (!confirmed) return
+    try {
+      if (onPromote) {
+        await onPromote(worker.id)
+      } else {
+        await workerService.promoteWorker(worker.id)
+      }
+      alert(`✅ تم تحويل الموظف "${worker.name}" إلى حساب حقيقي بنجاح!`)
+    } catch (err) {
+      alert(`❌ فشل التحويل: ${err.message}`)
+    }
+  }
+
   return (
     <div
       className="glass-card p-4 h-100 transition-all hover-transform border-0 position-relative overflow-hidden"
@@ -92,14 +136,30 @@ const WorkerCard = ({
           </div>
           <div>
             <h4 className="m-0 text-white fw-black text-uppercase">{worker.name}</h4>
-            <div className="d-flex align-items-center gap-2 mt-1">
+            <div className="d-flex align-items-center flex-wrap gap-2 mt-1">
               <span className="badge-premium x-small text-gold border-gold opacity-50">
                 #{worker.number}
               </span>
-              <span className="small text-silver opacity-50 fw-bold">
+              <span className="small text-silver opacity-75 fw-bold">
                 {ownerLabels[worker.owner] || worker.owner} |{' '}
-                {typeLabels[worker.type] || worker.type}
+                {worker.type === 'live' ? (
+                  <span className="text-gold fw-bold">حقيقي 💰</span>
+                ) : (
+                  <span className="text-silver">وهمي 📝</span>
+                )}
               </span>
+              {worker.type === 'paper' && (
+                <button
+                  type="button"
+                  onClick={handlePromoteClick}
+                  className="btn btn-sm btn-outline-warning extra-small py-0 px-2 rounded-pill d-inline-flex align-items-center gap-1 shadow-sm"
+                  style={{ fontSize: '11px', borderColor: 'rgba(212,175,55,0.5)', color: '#d4af37', background: 'rgba(212,175,55,0.1)' }}
+                  title="تحويل مباشر إلى حساب حقيقي يتداول بأموال حقيقية"
+                >
+                  <Zap size={11} className="text-gold" />
+                  ترقية لحقيقي ⚡
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -127,18 +187,28 @@ const WorkerCard = ({
         </div>
         <div className="col-4 text-center">
           <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
-            الزوج
+            الزوج / العملات
           </div>
-          <div className="fw-black text-gold fs-6 text-truncate" title={worker.user_settings?.symbol === 'ALL' ? 'الكل (القائمة البيضاء)' : (worker.user_settings?.symbol || worker.strategy_name || worker.pair || 'BTC/USDT')}>
-            {worker.user_settings?.symbol === 'ALL' ? 'الكل (القائمة البيضاء)' : (worker.user_settings?.symbol || worker.strategy_name || worker.pair || 'BTC/USDT')}
+          <div className="fw-black text-gold fs-6 text-truncate" title={getPairTitle()}>
+            {renderPairDisplay()}
           </div>
         </div>
         <div className="col-4 text-end">
           <div className="small text-silver opacity-50 fw-bold text-uppercase tracking-wider mb-1">
             الاستراتيجية
           </div>
-          <div className="fw-black text-white fs-6 text-truncate" title={worker.user_settings?.expert_signal?.name || 'تلقائي'}>
-            {worker.user_settings?.expert_signal?.name || 'تلقائي'}
+          <div className="fw-black text-white fs-6 text-truncate">
+            {worker.user_settings?.strategy_source === 'chart' ? (
+              <span className="text-warning d-inline-flex align-items-center gap-1">📈 شارت مباشر</span>
+            ) : worker.user_settings?.strategy_source === 'webhook' ? (
+              <span className="text-gold d-inline-flex align-items-center gap-1"><Webhook size={14} /> Webhook</span>
+            ) : worker.user_settings?.strategy_source === 'ai_prompt' ? (
+              <span className="text-info">🪄 AI Prompt</span>
+            ) : worker.user_settings?.strategy_source === 'nocode' ? (
+              <span className="text-emerald">🎛️ No-Code</span>
+            ) : (
+              worker.user_settings?.expert_signal?.name || worker.strategy_name || 'تلقائي'
+            )}
           </div>
         </div>
       </div>
@@ -229,13 +299,40 @@ const WorkerCard = ({
           >
             <Scissors size={20} />
           </button>
+          {worker.type === 'paper' && (
+            <button
+              onClick={handlePromoteClick}
+              className="btn btn-outline-warning p-3 rounded-4"
+              title="تحويل الموظف لحساب حقيقي يتداول بأموال حقيقية ⚡"
+            >
+              <Zap size={20} className="text-gold" />
+            </button>
+          )}
           <button
             onClick={() => onOpenClone(worker)}
             className="btn btn-outline-gold p-3 rounded-4"
-            title="استنساخ / ترقية للحقيقي"
+            title="استنساخ الموظف"
           >
             <Copy size={20} />
           </button>
+          {worker.user_settings?.strategy_source === 'webhook' && (
+            <button
+              onClick={async (e) => {
+                e.stopPropagation()
+                try {
+                  const info = await workerService.getWebhookUrl(worker.id)
+                  await navigator.clipboard.writeText(info.webhook_url)
+                  alert(`تم نسخ رابط Webhook بنجاح:\n${info.webhook_url}\n\nضع هذا الرابط في خانة Webhook URL في تنبيه TradingView.`)
+                } catch (err) {
+                  alert('فشل جلب رابط Webhook: ' + err.message)
+                }
+              }}
+              className="btn btn-outline-gold p-3 rounded-4"
+              title="نسخ رابط Webhook لـ TradingView"
+            >
+              <Webhook size={20} className="text-gold" />
+            </button>
+          )}
           <button
             onClick={() => {
               if (

@@ -5,6 +5,8 @@ Saqr (الصقر) — Direct Supabase REST Client
 يستخدم httpx مباشرة مع Supabase REST API (PostgREST).
 """
 import os
+import time
+import logging
 import httpx
 from dotenv import load_dotenv
 
@@ -20,7 +22,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 ADVISOR_TIMEOUT_SECONDS = int(os.environ.get("ADVISOR_TIMEOUT_SECONDS", "10"))
-DB_TIMEOUT_SECONDS = int(os.environ.get("DB_TIMEOUT_SECONDS", "30"))
+DB_TIMEOUT_SECONDS = int(os.environ.get("DB_TIMEOUT_SECONDS", "5"))
 
 # ✅ FIX: رفعنا الـ MEETING_ROUND_TIMEOUT من 60 لـ 120 ثانية
 # الجلسة فيها 8 جولات × كل جولة تاخد وقت — 60 ثانية مش كفاية
@@ -32,15 +34,20 @@ GLOBAL_SESSION_TIMEOUT = int(os.environ.get("GLOBAL_SESSION_TIMEOUT", "2400"))
 
 LOCAL_MODE: bool = not bool(SUPABASE_URL)
 
-# أضف في أعلى الملف — client مشترك بدل فتح connection جديد كل مرة
-_shared_http_client = httpx.Client(
-    timeout=DB_TIMEOUT_SECONDS,
-    limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
-)
+# Circuit Breaker for Supabase to avoid blocking event loop on paused/unreachable DB
+_supabase_circuit_open_until = 0.0
 
-def execute(self):
-    # استخدم _shared_http_client بدل فتح client جديد
-    r = _shared_http_client.get(url, ...)
+def is_supabase_circuit_open() -> bool:
+    global _supabase_circuit_open_until
+    return time.time() < _supabase_circuit_open_until
+
+def record_supabase_failure():
+    global _supabase_circuit_open_until
+    _supabase_circuit_open_until = time.time() + 60.0
+
+def record_supabase_success():
+    global _supabase_circuit_open_until
+    _supabase_circuit_open_until = 0.0
 
 def _headers(service: bool = False) -> dict:
     key = SUPABASE_SERVICE_KEY if service else SUPABASE_KEY
@@ -156,57 +163,73 @@ class SupabaseTable:
         return self
 
     def execute(self):
+        if is_supabase_circuit_open():
+            return type("Response", (), {
+                "data": None if self._single else [], "error": "Supabase circuit open (offline)", "count": 0
+            })()
+
         url = _url(self.table)
         headers = _headers(self.service)
 
         if self._count == "exact":
             headers["Prefer"] = "count=exact"
 
-        with httpx.Client(timeout=DB_TIMEOUT_SECONDS) as client:
-            if self._method == "GET":
-                r = client.get(url, headers=headers, params=self._params)
+        try:
+            fast_timeout = httpx.Timeout(4.0, connect=1.0)
+            with httpx.Client(timeout=fast_timeout) as client:
+                if self._method == "GET":
+                    r = client.get(url, headers=headers, params=self._params)
 
-            elif self._method == "POST":
-                post_headers = headers.copy()
-                if self._upsert:
-                    prefer = "resolution=merge-duplicates,return=representation"
-                    post_headers["Prefer"] = prefer
-                    if self._on_conflict:
-                        self._params["on_conflict"] = self._on_conflict
-                r = client.post(url, headers=post_headers, json=self._body, params=self._params)
+                elif self._method == "POST":
+                    post_headers = headers.copy()
+                    if self._upsert:
+                        prefer = "resolution=merge-duplicates,return=representation"
+                        post_headers["Prefer"] = prefer
+                        if self._on_conflict:
+                            self._params["on_conflict"] = self._on_conflict
+                    r = client.post(url, headers=post_headers, json=self._body, params=self._params)
 
-            elif self._method == "PATCH":
-                r = client.patch(url, headers=headers, json=self._body, params=self._params)
+                elif self._method == "PATCH":
+                    r = client.patch(url, headers=headers, json=self._body, params=self._params)
 
-            elif self._method == "DELETE":
-                r = client.delete(url, headers=headers, params=self._params)
+                elif self._method == "DELETE":
+                    r = client.delete(url, headers=headers, params=self._params)
 
-        if r.status_code >= 400:
-            raise Exception(f"HTTP {r.status_code}: {r.text[:1000]}")
+            if r.status_code >= 400:
+                raise Exception(f"HTTP {r.status_code}: {r.text[:1000]}")
 
-        result = r.json() if r.content else []
+            record_supabase_success()
+            result = r.json() if r.content else []
 
-        if isinstance(result, dict) and "message" in result:
-            raise Exception(result.get("message", "Unknown error"))
+            if isinstance(result, dict) and "message" in result:
+                raise Exception(result.get("message", "Unknown error"))
 
-        count_val = None
-        if self._count == "exact" and "Content-Range" in r.headers:
-            cr = r.headers["Content-Range"]
-            parts = cr.split("/")
-            if len(parts) == 2 and parts[1].isdigit():
-                count_val = int(parts[1])
+            count_val = None
+            if self._count == "exact" and "Content-Range" in r.headers:
+                cr = r.headers["Content-Range"]
+                parts = cr.split("/")
+                if len(parts) == 2 and parts[1].isdigit():
+                    count_val = int(parts[1])
 
-        data_list = result if isinstance(result, list) else [result]
+            data_list = result if isinstance(result, list) else [result]
 
-        if self._single:
-            single_val = data_list[0] if data_list else None
+            if self._single:
+                single_val = data_list[0] if data_list else None
+                return type("Response", (), {
+                    "data": single_val, "error": None, "count": None
+                })()
+
             return type("Response", (), {
-                "data": single_val, "error": None, "count": None
+                "data": data_list, "error": None, "count": count_val
             })()
-
-        return type("Response", (), {
-            "data": data_list, "error": None, "count": count_val
-        })()
+        except Exception as e:
+            err_str = str(e)
+            if "getaddrinfo" in err_str or "Connect" in err_str or "timeout" in err_str.lower():
+                record_supabase_failure()
+            logging.getLogger("SupabaseClient").warning(f"⚠️ Supabase query to '{self.table}' failed: {e}")
+            return type("Response", (), {
+                "data": None if self._single else [], "error": str(e), "count": 0
+            })()
 
 
 class SupabaseRPC:
@@ -216,14 +239,26 @@ class SupabaseRPC:
         self.service = service
 
     def execute(self):
+        if is_supabase_circuit_open():
+            return type("Response", (), {"data": None, "error": "Supabase circuit open (offline)"})()
+
         url = _rpc_url(self.fn)
         headers = _headers(self.service)
-        with httpx.Client(timeout=DB_TIMEOUT_SECONDS) as client:
-            r = client.post(url, headers=headers, json=self.params)
-        if r.status_code >= 400:
-            raise Exception(f"RPC HTTP {r.status_code}: {r.text[:300]}")
-        data = r.json() if r.content else None
-        return type("Response", (), {"data": data, "error": None})()
+        try:
+            fast_timeout = httpx.Timeout(4.0, connect=1.0)
+            with httpx.Client(timeout=fast_timeout) as client:
+                r = client.post(url, headers=headers, json=self.params)
+            if r.status_code >= 400:
+                raise Exception(f"RPC HTTP {r.status_code}: {r.text[:300]}")
+            record_supabase_success()
+            data = r.json() if r.content else None
+            return type("Response", (), {"data": data, "error": None})()
+        except Exception as e:
+            err_str = str(e)
+            if "getaddrinfo" in err_str or "Connect" in err_str or "timeout" in err_str.lower():
+                record_supabase_failure()
+            logging.getLogger("SupabaseClient").warning(f"⚠️ Supabase RPC '{self.fn}' failed: {e}")
+            return type("Response", (), {"data": None, "error": str(e)})()
 
 
 class SimpleSupabaseClient:

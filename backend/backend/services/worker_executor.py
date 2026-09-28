@@ -6,6 +6,9 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from ..strategies.prince_stable import PrinceStableStrategy
 from ..strategies.dynamic_strategy import DynamicStrategy
+from ..strategies.webhook_strategy import WebhookStrategy
+from ..strategies.nocode_strategy import NoCodeStrategy
+from ..strategies.ai_prompt_strategy import AIPromptStrategy
 from ..config import get_supabase_client, get_supabase_admin_client
 from .exchange_service import get_market_instance
 
@@ -44,51 +47,163 @@ class WorkerExecutor:
         # Market Instance (New Architecture)
         self.market = None
         self.market_type = 'crypto'
-        self.is_paper = True
+        worker_type = str(self.worker.get('type') or user_settings.get('workerType', 'paper')).lower()
+        self.is_paper = (worker_type != 'live')
         self.consecutive_failures = 0
         self.market_direction = "neutral" # Default
 
         self._initialize_strategy()
 
     async def _initialize_market(self):
-        """تجهيز كلاس السوق بناءً على المنصة المختارة"""
+        """تجهيز كلاس السوق بناءً على المنصة المختارة أو السوق النشط في النظام"""
         try:
-            # FIX: نستخدم admin client عشان يتخطى RLS ويقدر يقرأ market_apis
             from backend.config import get_supabase_admin_client
             supabase = get_supabase_admin_client()
+
+            worker_type = str(self.worker.get('type') or self.worker.get('user_settings', {}).get('workerType', 'paper')).lower()
+            self.is_paper = (worker_type != 'live')
+
+            market_data = None
             if self.market_id:
-                # جلب بيانات السوق والـ APIs
                 market_resp = supabase.table('markets').select('*, market_apis(*)').eq('id', self.market_id).execute()
                 if market_resp.data:
                     market_data = market_resp.data[0]
-                    self.market_type = market_data.get('type', 'crypto')
-                    apis = market_data.get('market_apis', [])
-                    
-                    if apis:
-                        api_config = apis[0]
-                        # Paper أو Live بناءً على إعداد الموظف في user_settings
-                        worker_type = self.worker.get('user_settings', {}).get('workerType', 'paper')
-                        self.is_paper = (worker_type != 'live')
-                        
-                        self.market = await get_market_instance(
-                            exchange=market_data['name'],
-                            api_config=api_config,
-                            is_paper=self.is_paper
-                        )
-                        mode = 'Paper' if self.is_paper else 'Live'
-                        self.logger.info(f"✅ Market initialized: {market_data['name']} ({mode})")
+
+            if not market_data:
+                # إذا لم يكن محدد market_id، نربطه بالسوق النشط من قاعدة البيانات
+                market_resp = supabase.table('markets').select('*, market_apis(*)').execute()
+                if market_resp.data:
+                    markets_with_apis = [m for m in market_resp.data if m.get('market_apis')]
+                    market_data = markets_with_apis[0] if markets_with_apis else market_resp.data[0]
+
+            if market_data:
+                self.market_id = market_data.get('id')
+                self.market_type = market_data.get('type', 'crypto')
+                apis = market_data.get('market_apis', [])
+
+                user_id = self.worker.get('user_id')
+                user_apis = [a for a in apis if str(a.get('user_id')) == str(user_id)] if user_id else []
+                api_config = user_apis[0] if user_apis else (apis[0] if apis else {})
+
+                self.market = await get_market_instance(
+                    exchange=market_data['name'],
+                    api_config=api_config,
+                    is_paper=self.is_paper
+                )
+                mode = 'Paper' if self.is_paper else 'Live'
+                has_control = bool(api_config.get('control_api_key'))
+                self.logger.info(f"✅ Market initialized: {market_data['name']} ({mode}) — Live Keys attached: {'YES' if has_control else 'NO'}")
+            else:
+                from .markets.binance import BinanceMarket
+                self.market = BinanceMarket({}, is_paper=self.is_paper)
+                self.logger.info("ℹ️ Initialized default Binance market for public data feed")
         except Exception as e:
             self.logger.error(f"Failed to initialize market instance: {e}")
 
     def _initialize_strategy(self):
         settings = self.worker.get('user_settings', {})
-        if 'expert_signal' in settings:
+        strategy_source = settings.get('strategy_source', 'kitchen')
+
+        if strategy_source == 'webhook':
+            self.strategy = WebhookStrategy(params=settings)
+            self.logger.info(f"Initialized WebhookStrategy for worker {self.worker.get('name')}")
+        elif strategy_source == 'ai_prompt':
+            self.strategy = AIPromptStrategy(params=settings)
+            self.logger.info(f"Initialized AIPromptStrategy for worker {self.worker.get('name')}")
+        elif strategy_source in ('nocode', 'chart'):
+            self.strategy = NoCodeStrategy(params=settings)
+            self.logger.info(f"Initialized NoCodeStrategy (Chart Mode) for worker {self.worker.get('name')}")
+        elif 'expert_signal' in settings:
             self.strategy = DynamicStrategy(params={'expert_signal': settings['expert_signal']})
         elif self.worker.get('owner') == 'prince' and self.worker.get('market_type') == 'stable':
             self.strategy = PrinceStableStrategy()
         else:
             # FIX: fallback بدل None عشان الموظف ما يوقفش
             self.strategy = DynamicStrategy(params={})
+
+    async def handle_webhook_signal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        معالجة فورية فائقة السرعة لإشارة Webhook قادمة من TradingView
+        """
+        action = str(payload.get('action', '')).lower()
+        raw_symbol = payload.get('symbol', '')
+        symbol = raw_symbol
+        if symbol and '/' not in symbol and symbol.endswith('USDT'):
+            symbol = f"{symbol[:-4]}/USDT"
+            
+        if not symbol:
+            symbol = self.worker.get('user_settings', {}).get('symbol', 'BTC/USDT')
+
+        if not self.market:
+            await self._initialize_market()
+
+        if isinstance(self.strategy, WebhookStrategy):
+            self.strategy.inject_signal(payload)
+
+        if action in ('buy', 'long'):
+            active_trades = []
+            try:
+                supabase = get_supabase_admin_client()
+                active_trades_resp = supabase.table('trades').select('*').eq('worker_id', self.worker_id).is_('exit_at', 'null').execute()
+                active_trades = active_trades_resp.data or []
+            except Exception as se:
+                self.logger.warning(f"Could not query active trades: {se}")
+            
+            for t in active_trades:
+                if t.get('pair') == symbol:
+                    self.logger.warning(f"Trade already open for {symbol}. Skipping duplicate webhook entry.")
+                    return {"status": "ignored", "reason": f"Active trade already open for {symbol}"}
+                    
+            if not self._can_open_more_trades(len(active_trades)):
+                self.logger.warning("Max concurrent trades limit reached.")
+                return {"status": "ignored", "reason": "Max trades limit reached"}
+                
+            df = pd.DataFrame()
+            if self.market:
+                try:
+                    df = await self.market.get_historical(symbol, interval="1m", limit=30)
+                except Exception as me:
+                    self.logger.warning(f"Failed to fetch historical data: {me}")
+            
+            if df.empty:
+                price = float(payload.get('price', 60000.0))
+                df = pd.DataFrame([{'open': price, 'high': price, 'low': price, 'close': price, 'volume': 1000}])
+                
+            await self._check_enter(df, symbol)
+            return {"status": "executed", "action": "buy", "symbol": symbol}
+
+        elif action in ('sell', 'close', 'exit', 'short'):
+            active_trades = []
+            try:
+                supabase = get_supabase_admin_client()
+                active_trades_resp = supabase.table('trades').select('*').eq('worker_id', self.worker_id).eq('pair', symbol).is_('exit_at', 'null').execute()
+                active_trades = active_trades_resp.data or []
+                
+                if not active_trades:
+                    active_trades_resp = supabase.table('trades').select('*').eq('worker_id', self.worker_id).is_('exit_at', 'null').execute()
+                    active_trades = active_trades_resp.data or []
+            except Exception as se:
+                self.logger.warning(f"Could not query active trades: {se}")
+
+            if not active_trades:
+                return {"status": "ignored", "reason": f"No active trade found for {symbol}"}
+
+            trade = active_trades[0]
+            last_price = float(payload.get('price', trade.get('entry_price', 100.0)))
+            if self.market:
+                try:
+                    df = await self.market.get_historical(trade['pair'], interval="1m", limit=5)
+                    if not df.empty:
+                        last_price = float(df.iloc[-1]['close'])
+                except Exception:
+                    pass
+            qty = float(trade.get('amount_actual', 1.0))
+            entry_price = float(trade.get('entry_price', last_price))
+            
+            await self._execute_exit(trade, last_price, qty, entry_price, "webhook_signal")
+            return {"status": "executed", "action": action, "symbol": trade.get('pair', symbol), "exit_price": last_price}
+
+        return {"status": "unknown_action", "action": action}
 
     async def run(self):
         # 1. Initialize Market if not already done
@@ -148,46 +263,83 @@ class WorkerExecutor:
                     self.logger.warning(f"Could not check global active trades: {ex}")
                     global_active_symbols = list(active_trades.keys())
 
-                # استخدام Groq للحصول على إشارة AI مباشرة وموزعة
-                from backend.services.gemini_signal import fetch_gemini_signal
-                signal = await fetch_gemini_signal(
-                    active_symbols=global_active_symbols,
-                    worker_settings=self.worker.get('user_settings', {}),
-                    tradeable_symbols=tradeable_symbols,
-                    market_type=self.market_type
-                )
-                
-                if signal:
-                    symbol = signal['symbol']
-                    if symbol not in active_trades:
-                        df_1m = await self.market.get_historical(symbol, interval="1m", limit=100)
-                        if not df_1m.empty:
-                            # ✅ احسب المؤشرات الفنية للشموع لمنع KeyError في شروط الدخول/الخروج
-                            df_1m = self.strategy.calculate_indicators(df_1m)
-                            
-                            # ✅ جلب نسبة النجاح التاريخية للمفاضلة
-                            success_rate = 50.0
-                            try:
-                                from backend.services.pattern_matcher import pattern_matcher
-                                last_row = df_1m.iloc[-1]
-                                current_state = {
-                                    "rsi": float(last_row.get('rsi', 50)),
-                                    "trend": float(last_row.get('close', 0))
-                                }
-                                report = await pattern_matcher.get_quantitative_report(
-                                    symbol=symbol,
-                                    timeframe="15m",
-                                    current_state=current_state
-                                )
-                                success_rate = float(report.get('discovery_stats', {}).get('success_rate', 50.0))
-                            except Exception as pe:
-                                self.logger.warning(f"Failed to fetch pattern matcher success rate for {symbol}: {pe}")
-                            
-                            candidates.append({
-                                "symbol": symbol,
-                                "df": df_1m,
-                                "success_rate": success_rate
-                            })
+                settings = self.worker.get('user_settings', {})
+                strategy_source = settings.get('strategy_source', 'kitchen')
+
+                if strategy_source in ('nocode', 'ai_prompt'):
+                    # فحص القواعد الفنية المخصصة للاستراتيجية
+                    for symbol in tradeable_symbols:
+                        if symbol in active_trades or symbol in global_active_symbols:
+                            continue
+                        try:
+                            df_check = await self.market.get_historical(symbol, interval="1m", limit=60)
+                            if df_check.empty or len(df_check) < 20:
+                                continue
+                            df_check = self.strategy.calculate_indicators(df_check)
+                            if self.strategy.should_enter(df_check):
+                                candidates.append({
+                                    "symbol": symbol,
+                                    "df": df_check,
+                                    "success_rate": 80.0
+                                })
+                                if len(candidates) >= (self.max_trades - len(active_trades)):
+                                    break
+                        except Exception as ce:
+                            self.logger.warning(f"Error evaluating rule for {symbol}: {ce}")
+                elif strategy_source == 'webhook':
+                    # فحص الإشارات المعلقة للـ Webhook
+                    for symbol in tradeable_symbols:
+                        if symbol in active_trades or symbol in global_active_symbols:
+                            continue
+                        if self.strategy.should_enter(pd.DataFrame(), symbol):
+                            df_sym = await self.market.get_historical(symbol, interval="1m", limit=30)
+                            if not df_sym.empty:
+                                candidates.append({
+                                    "symbol": symbol,
+                                    "df": df_sym,
+                                    "success_rate": 90.0
+                                })
+                else:
+                    # استخدام Groq للحصول على إشارة AI مباشرة وموزعة
+                    from backend.services.gemini_signal import fetch_gemini_signal
+                    signal = await fetch_gemini_signal(
+                        active_symbols=global_active_symbols,
+                        worker_settings=self.worker.get('user_settings', {}),
+                        tradeable_symbols=tradeable_symbols,
+                        market_type=self.market_type
+                    )
+                    
+                    if signal:
+                        symbol = signal['symbol']
+                        if symbol not in active_trades:
+                            df_1m = await self.market.get_historical(symbol, interval="1m", limit=100)
+                            if not df_1m.empty:
+                                # ✅ احسب المؤشرات الفنية للشموع لمنع KeyError في شروط الدخول/الخروج
+                                df_1m = self.strategy.calculate_indicators(df_1m)
+                                
+                                # ✅ جلب نسبة النجاح التاريخية للمفاضلة
+                                success_rate = 50.0
+                                try:
+                                    from backend.services.pattern_matcher import pattern_matcher
+                                    last_row = df_1m.iloc[-1]
+                                    current_state = {
+                                        "rsi": float(last_row.get('rsi', 50)),
+                                        "trend": float(last_row.get('close', 0))
+                                    }
+                                    report = await pattern_matcher.get_quantitative_report(
+                                        symbol=symbol,
+                                        timeframe="15m",
+                                        current_state=current_state
+                                    )
+                                    success_rate = float(report.get('discovery_stats', {}).get('success_rate', 50.0))
+                                except Exception as pe:
+                                    self.logger.warning(f"Failed to fetch pattern matcher success rate for {symbol}: {pe}")
+                                
+                                candidates.append({
+                                    "symbol": symbol,
+                                    "df": df_1m,
+                                    "success_rate": success_rate
+                                })
 
                 # المفاضلة والتنفيذ بناءً على نسبة النجاح التاريخية (Tie-breaking)
                 if candidates:
@@ -299,34 +451,49 @@ class WorkerExecutor:
         sizing_val = float(settings.get('tradeSizingValue', 10))
         order_value = sizing_val if settings.get('tradeSizingType') == 'fixed' else usable_cap * (sizing_val / 100)
 
+        # Minimum order value check for real spot trading (Binance min notional is $10)
+        if not self.is_paper and order_value < 10.0:
+            if usable_cap >= 10.5:
+                order_value = 10.5
+            else:
+                self.logger.warning(f"⚠️ Usable capital (${usable_cap:.2f}) is below Binance minimum $10 order size.")
+                return
+
         if order_value > usable_cap or order_value <= 0: return
 
         qty = order_value / price
         try:
             # 1. Place order on Exchange (Live/Paper)
             if self.market and not self.is_paper:
-                # Buy Order
-                await self.market.buy(symbol, qty)
+                # Real Live Buy Order
+                buy_res = await self.market.buy(symbol, qty)
+                self.logger.info(f"🚀 [LIVE TRADING] Real Buy Order executed on Exchange for {symbol}: {buy_res}")
                 # Hard Stop Loss Order
-                sl_val = float(settings.get('slValue', 2.0))
-                sl_price = price * (1 - (sl_val / 100))
-                await self.market.place_stop_loss(symbol, sl_price, qty)
-                self.logger.info(f"✅ Order & Hard SL placed on Exchange for {symbol}")
+                try:
+                    sl_val = float(settings.get('slValue', 2.0))
+                    sl_price = price * (1 - (sl_val / 100))
+                    await self.market.place_stop_loss(symbol, sl_price, qty)
+                    self.logger.info(f"🛡️ [LIVE TRADING] Hard Stop Loss placed on Exchange for {symbol}")
+                except Exception as sle:
+                    self.logger.warning(f"Stop loss placement warning: {sle}")
             else:
                 self.logger.info(f"✅ [Paper Mode] Mock order & SL placed locally for {symbol} at {price}")
 
             # 2. Record in DB
-            supabase = get_supabase_admin_client()
-            trade_data = {
-                "user_id": self.worker['user_id'],
-                "worker_id": self.worker_id,
-                "pair": symbol,
-                "entry_price": price,
-                "amount_actual": qty,
-                "entry_at": datetime.now().isoformat(),
-            }
-            supabase.table('trades').insert(trade_data).execute()
-            self._db_update_capital(available_cap - order_value)
+            try:
+                supabase = get_supabase_admin_client()
+                trade_data = {
+                    "user_id": self.worker['user_id'],
+                    "worker_id": self.worker_id,
+                    "pair": symbol,
+                    "entry_price": price,
+                    "amount_actual": qty,
+                    "entry_at": datetime.now().isoformat(),
+                }
+                supabase.table('trades').insert(trade_data).execute()
+                self._db_update_capital(available_cap - order_value)
+            except Exception as de:
+                self.logger.warning(f"Could not insert trade into DB: {de}")
             
             # امسح الكاش عشان الموظفين التانيين ما يفتحوش نفس العملة
             from backend.services.gemini_signal import invalidate_cache
@@ -363,7 +530,8 @@ class WorkerExecutor:
         try:
             # 1. Execute on Exchange
             if self.market and not self.is_paper:
-                await self.market.sell(position['pair'], qty)
+                sell_res = await self.market.sell(position['pair'], qty)
+                self.logger.info(f"🚀 [LIVE TRADING] Real Sell Order executed on Exchange for {position['pair']}: {sell_res}")
             else:
                 self.logger.info(f"✅ [Paper Mode] Mock exit executed locally for {position['pair']} at {exit_price}")
 
@@ -494,11 +662,22 @@ class WorkerExecutor:
             raw_tradeable = [s['symbol'] for s in whitelist.data] if whitelist.data else []
             direction = [s['symbol'] for s in leaders.data] if leaders.data else []
             
-            # ✅ لو الموظف مخصص له سلة عملات مستهدفة محددة تم تحليلها في اجتماع الخبراء، يتداول عليها فقط
-            target_symbols = self.worker.get('user_settings', {}).get('target_symbols')
+            # ✅ لو الموظف مخصص له عملة أو سلة عملات محددة، يتداول عليها فقط
+            target_symbols = (
+                self.worker.get('user_settings', {}).get('target_symbols')
+                or self.worker.get('user_settings', {}).get('symbols')
+            )
+            if not target_symbols:
+                raw_pair = self.worker.get('pair') or self.worker.get('user_settings', {}).get('symbol')
+                if raw_pair and raw_pair != 'ALL':
+                    if ',' in raw_pair:
+                        target_symbols = [p.strip() for p in raw_pair.split(',') if p.strip()]
+                    else:
+                        target_symbols = [raw_pair.strip()]
+
             if target_symbols and isinstance(target_symbols, list) and len(target_symbols) > 0:
-                tradeable = [s for s in target_symbols if s in raw_tradeable] or target_symbols
-                self.logger.info(f"🎯 Worker restricted to {len(tradeable)} analyzed target symbols: {tradeable}")
+                tradeable = target_symbols
+                self.logger.info(f"🎯 Worker restricted to {len(tradeable)} target symbols: {tradeable}")
             else:
                 tradeable = raw_tradeable
             

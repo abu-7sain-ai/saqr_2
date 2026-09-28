@@ -99,8 +99,6 @@ export const workerService = {
    * Clone a strategy into a new worker
    */
   async cloneWorker(payload) {
-    // 1. Logic for auto-naming should ideally happen on backend to ensure atomicity
-    // But for now we call the new backend endpoint
     const response = await fetch(`${BACKEND_URL}/api/v1/workers/clone`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -112,6 +110,52 @@ export const workerService = {
       throw new Error(err.detail || 'فشل استنساخ الموظف')
     }
 
+    return await response.json()
+  },
+
+  /**
+   * Create a standalone worker with Webhook, AI Prompt, or No-Code Strategy
+   */
+  async createWorker(payload) {
+    const response = await fetch(`${BACKEND_URL}/api/v1/workers/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.detail || 'فشل إنشاء الموظف')
+    }
+
+    return await response.json()
+  },
+
+  /**
+   * Get unique webhook URL and TradingView alert instructions for a worker
+   */
+  async getWebhookUrl(workerId) {
+    const response = await fetch(`${BACKEND_URL}/api/v1/workers/${workerId}/webhook-url`)
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.detail || 'فشل جلب رابط الـ Webhook')
+    }
+    return await response.json()
+  },
+
+  /**
+   * Parse natural language prompt into structured trading rules
+   */
+  async parsePrompt(prompt) {
+    const response = await fetch(`${BACKEND_URL}/api/v1/workers/parse-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt })
+    })
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.detail || 'فشل تحليل الاستراتيجية')
+    }
     return await response.json()
   },
 

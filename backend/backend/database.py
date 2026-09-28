@@ -12,6 +12,7 @@ supabase = get_supabase_admin_client()
 _WORKER_EXCLUDED_COLS = {
     'concurrency_mode', 'is_hunter', 'model_type',
     'max_concurrent_trades', 'selection_criteria',
+    'pairs', 'symbols',
 }
 
 
@@ -317,18 +318,23 @@ class Database:
 
     @staticmethod
     def clone_worker_direct(worker_data):
-        """Directly inserts a worker dictionary into the DB."""
+        """Directly inserts a worker dictionary into the DB with low latency."""
+        import threading, time
         try:
-            rpc_params = {
-                "p_user_id": worker_data['user_id'],
-                "p_owner": worker_data.get('owner', 'prince'),
-                "p_market_type": worker_data.get('market_type', 'stable')
-            }
-            number_resp = supabase.rpc('next_worker_number', rpc_params).execute()
-            worker_data["number"] = number_resp.data if number_resp.data else 1
+            if not worker_data.get("number"):
+                global _last_worker_number_cache
+                if '_last_worker_number_cache' in globals() and _last_worker_number_cache:
+                    _last_worker_number_cache += 1
+                    worker_data["number"] = _last_worker_number_cache
+                else:
+                    try:
+                        res = supabase.table('workers').select('number').order('number', desc=True).limit(1).execute()
+                        _last_worker_number_cache = (res.data[0]['number'] + 1) if res.data and res.data[0].get('number') else 200
+                        worker_data["number"] = _last_worker_number_cache
+                    except Exception:
+                        worker_data["number"] = int(time.time() % 100000)
 
-            # ✅ FIX: workers table مفيش فيه عمود 'pair' — بنشيل symbol بدون تحويل
-            # الـ symbol بيتحفظ في strategy_name و user_settings.symbol
+            # Clean extra fields
             if 'symbol' in worker_data:
                 del worker_data['symbol']
 
@@ -337,21 +343,29 @@ class Database:
             elif 'session_id' in worker_data:
                 del worker_data['session_id']
 
-            # ✅ FIX: شيل الـ columns غير الموجودة في الـ DB
+            # Exclude unpersisted cols and sanitize
             safe_worker = {k: v for k, v in worker_data.items()
                            if k not in _WORKER_EXCLUDED_COLS}
-
-            # ✅ FIX: نظّف nan/inf
             safe_worker = _sanitize_for_json(safe_worker)
 
             response = supabase.table('workers').insert(safe_worker).execute()
 
-            Database.log_activity(
-                worker_data['user_id'],
-                "worker_cloned",
-                f"تم استنساخ الموظف {worker_data['name']}",
-                {"worker_id": response.data[0]['id']} if response.data else {}
-            )
+            # Non-blocking background activity logging
+            if response.data:
+                w_id = response.data[0].get('id')
+                user_id = worker_data.get('user_id')
+                w_name = worker_data.get('name', '')
+                threading.Thread(
+                    target=Database.log_activity,
+                    args=(
+                        user_id,
+                        "worker_cloned",
+                        f"تم إنشاء/استنساخ الموظف {w_name}",
+                        {"worker_id": w_id} if w_id else {}
+                    ),
+                    daemon=True
+                ).start()
+
             return response.data[0] if response.data else None
         except Exception as e:
             print(f"Error in clone_worker_direct: {e}")

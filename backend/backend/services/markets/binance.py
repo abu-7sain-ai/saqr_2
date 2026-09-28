@@ -26,6 +26,16 @@ class BinanceMarket(BaseMarket):
             'enableRateLimit': True,
             'options': {'defaultType': 'spot'}
         })
+        self._markets_loaded = False
+
+    async def _ensure_markets(self):
+        if not self._markets_loaded:
+            try:
+                await self.public_client.load_markets()
+                self.client.markets = self.public_client.markets
+                self._markets_loaded = True
+            except Exception as e:
+                logger.warning(f"Could not load markets for precision: {e}")
 
     async def close(self):
         await self.client.close()
@@ -41,12 +51,21 @@ class BinanceMarket(BaseMarket):
             raise
 
     async def buy(self, symbol: str, amount: float) -> dict:
-        # FIX: amount هنا = qty (كمية العملة) محسوبة من worker_executor
-        # create_market_buy_order(symbol, amount) = شراء (amount) وحدة من العملة
-        # الحد الأدنى على Binance عادةً 10 USDT — تأكد إن order_value >= 10
+        await self._ensure_markets()
+        try:
+            if self.client.markets and symbol in self.client.markets:
+                amount = float(self.client.amount_to_precision(symbol, amount))
+        except Exception:
+            pass
         return await self.client.create_market_buy_order(symbol, amount)
 
     async def sell(self, symbol: str, amount: float) -> dict:
+        await self._ensure_markets()
+        try:
+            if self.client.markets and symbol in self.client.markets:
+                amount = float(self.client.amount_to_precision(symbol, amount))
+        except Exception:
+            pass
         return await self.client.create_market_sell_order(symbol, amount)
 
     async def get_balance(self) -> float:

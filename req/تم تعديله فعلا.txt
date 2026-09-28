@@ -1,0 +1,3449 @@
+
+
+
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 تعديل الاسواق 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+# برمجة الأسواق والقوائم
+## شرح لـ Antigravity بالتفصيل
+
+---
+
+## الفكرة الأساسية
+
+```
+كل سوق = 3 APIs + قائمتان
+
+API المتابعة → يشوف الأسعار لحظياً
+API التحكم → يدخل ويخرج صفقات
+API البيانات القديمة → للـ Backtesting
+
+القائمة البيضاء → يتداول فيها
+قائمة القياديين → يراقبها فقط لمعرفة الاتجاه
+
+الصقر لا يشوف أي عملة/سهم خارج القائمتين
+```
+
+---
+
+## قاعدة البيانات
+
+```sql
+-- جدول الأسواق
+CREATE TABLE markets (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('crypto', 'stocks', 'forex')),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    user_id UUID REFERENCES profiles(id)
+);
+
+-- جدول API Keys
+CREATE TABLE market_apis (
+    id UUID PRIMARY KEY,
+    market_id UUID REFERENCES markets(id),
+    
+    -- API المتابعة (URL ثابت في الكود)
+    watch_api_key TEXT,
+    watch_api_secret TEXT,
+    
+    -- API التحكم (URL ثابت في الكود)
+    control_api_key TEXT,
+    control_api_secret TEXT,
+    
+    -- API البيانات القديمة (URL ثابت في الكود)
+    historical_api_key TEXT,
+    
+    last_tested_at TIMESTAMPTZ,
+    is_connected BOOLEAN DEFAULT FALSE,
+    user_id UUID REFERENCES profiles(id)
+);
+
+-- القائمة البيضاء (يتداول)
+CREATE TABLE whitelist (
+    id UUID PRIMARY KEY,
+    market_id UUID REFERENCES markets(id),
+    symbol TEXT NOT NULL,
+    symbol_name TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    added_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- قائمة القياديين (يراقب الاتجاه فقط)
+CREATE TABLE market_leaders (
+    id UUID PRIMARY KEY,
+    market_id UUID REFERENCES markets(id),
+    symbol TEXT NOT NULL,
+    symbol_name TEXT,
+    reason TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    added_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+---
+
+## واجهة إضافة سوق جديد
+
+```
+اسم المنصة: [فراغ نصي]
+
+النوع:
+☐ كريبتو
+☐ أسهم أمريكية
+☐ فوركس
+
+--- API المتابعة ---
+الوصف: يستخدم لمشاهدة الأسعار لحظياً
+API Key: [فراغ]
+API Secret: [فراغ]
+(الـ URL محدد تلقائياً حسب المنصة)
+
+--- API التحكم ---
+الوصف: يستخدم لدخول وخروج الصفقات الفعلية
+API Key: [فراغ]
+API Secret: [فراغ]
+(الـ URL محدد تلقائياً حسب المنصة)
+
+--- API البيانات القديمة ---
+الوصف: يستخدم لجلب بيانات تاريخية للـ Backtesting
+API Key: [فراغ]
+(الـ URL محدد تلقائياً حسب المنصة)
+
+زر: اختبار الاتصال 🔌
+زر: إضافة المنصة ✅
+```
+
+---
+
+## واجهة القائمتين
+
+```
+إعدادات Binance:
+
+--- القائمة البيضاء (يتداول) ---
+زر: + إضافة عملة
+
+BTC/USDT  | Bitcoin          | ✅ نشط | 🗑️ حذف
+ETH/USDT  | Ethereum         | ✅ نشط | 🗑️ حذف
+BNB/USDT  | Binance Coin     | ✅ نشط | 🗑️ حذف
+
+--- قائمة القياديين (يراقب الاتجاه) ---
+زر: + إضافة عملة
+
+BTC/USDT  | يقود سوق الكريبتو | 👁️ مراقبة | 🗑️ حذف
+ETH/USDT  | ثاني أكبر عملة    | 👁️ مراقبة | 🗑️ حذف
+```
+
+---
+
+## القاعدة البرمجية
+
+```python
+def get_symbols_for_worker(market_id):
+    """
+    الصقر يشوف فقط هذين النوعين
+    غيرهم = لا يوجد
+    """
+    # يتداول فيها
+    tradeable = whitelist.get_active(market_id)
+    
+    # يراقب فقط لمعرفة الاتجاه
+    leaders = market_leaders.get_active(market_id)
+    direction_only = [s for s in leaders if s not in tradeable]
+    
+    return {
+        "tradeable": tradeable,      # يدخل صفقات ✅
+        "direction": direction_only  # يراقب فقط 👁️
+    }
+
+def can_trade(symbol, market_id):
+    """هل يجوز التداول في هذا الزوج؟"""
+    return symbol in whitelist.get_active(market_id)
+
+def should_monitor(symbol, market_id):
+    """هل يجوز مراقبة هذا الزوج لتحديد الاتجاه؟"""
+    return symbol in market_leaders.get_active(market_id)
+```
+
+---
+
+## مثال 1 — Binance (كريبتو)
+
+```python
+class BinanceMarket(BaseMarket):
+    name = "Binance"
+    type = "crypto"
+    
+    # URLs ثابتة في الكود — المستخدم يكتب Key و Secret فقط
+    WATCH_URL = "wss://stream.binance.com:9443"
+    CONTROL_URL = "https://api.binance.com"
+    HISTORICAL_URL = "https://api.binance.com"
+    
+    async def get_price(self, symbol):
+        # BTC/USDT → 42,350.50$
+        response = await self.client.get(
+            f"{self.CONTROL_URL}/api/v3/ticker/price",
+            params={"symbol": symbol.replace("/", "")}
+        )
+        return float(response["price"])
+    
+    async def buy(self, symbol, amount):
+        return await self.client.post(
+            f"{self.CONTROL_URL}/api/v3/order",
+            data={
+                "symbol": symbol.replace("/", ""),
+                "side": "BUY",
+                "type": "MARKET",
+                "quoteOrderQty": amount
+            }
+        )
+    
+    async def get_historical(self, symbol, start, end, timeframe="4h"):
+        return await self.client.get(
+            f"{self.HISTORICAL_URL}/api/v3/klines",
+            params={
+                "symbol": symbol.replace("/", ""),
+                "interval": timeframe,
+                "startTime": start,
+                "endTime": end
+            }
+        )
+    
+    async def place_stop_loss(self, symbol, price):
+        return await self.client.post(
+            f"{self.CONTROL_URL}/api/v3/order",
+            data={
+                "symbol": symbol.replace("/", ""),
+                "side": "SELL",
+                "type": "STOP_LOSS_LIMIT",
+                "stopPrice": price
+            }
+        )
+
+# القوائم لـ Binance
+BINANCE_WHITELIST = [
+    {"symbol": "BTC/USDT", "name": "Bitcoin"},
+    {"symbol": "ETH/USDT", "name": "Ethereum"},
+    {"symbol": "BNB/USDT", "name": "Binance Coin"},
+]
+
+BINANCE_LEADERS = [
+    {"symbol": "BTC/USDT", "name": "Bitcoin", "reason": "يقود سوق الكريبتو"},
+    {"symbol": "ETH/USDT", "name": "Ethereum", "reason": "ثاني أكبر عملة"},
+]
+```
+
+---
+
+## مثال 2 — Alpaca (أسهم أمريكية)
+
+```python
+class AlpacaMarket(BaseMarket):
+    name = "Alpaca"
+    type = "stocks"
+    
+    # URLs ثابتة في الكود
+    WATCH_URL = "wss://stream.data.alpaca.markets/v2/iex"
+    CONTROL_URL_PAPER = "https://paper-api.alpaca.markets"  # وهمي
+    CONTROL_URL_LIVE = "https://api.alpaca.markets"          # حقيقي
+    HISTORICAL_URL = "https://data.alpaca.markets"
+    
+    async def get_price(self, symbol):
+        # AAPL → 182.50$
+        response = await self.client.get(
+            f"{self.HISTORICAL_URL}/v2/stocks/{symbol}/trades/latest"
+        )
+        return float(response["trade"]["p"])
+    
+    async def buy(self, symbol, amount):
+        return await self.client.post(
+            f"{self.control_url}/v2/orders",
+            data={
+                "symbol": symbol,
+                "notional": amount,  # بالدولار مو بالعدد
+                "side": "buy",
+                "type": "market",
+                "time_in_force": "day"
+            }
+        )
+    
+    async def get_historical(self, symbol, start, end, timeframe="1Hour"):
+        return await self.client.get(
+            f"{self.HISTORICAL_URL}/v2/stocks/{symbol}/bars",
+            params={
+                "timeframe": timeframe,
+                "start": start,
+                "end": end
+            }
+        )
+
+# القوائم لـ Alpaca
+ALPACA_WHITELIST = [
+    {"symbol": "AAPL", "name": "Apple"},
+    {"symbol": "MSFT", "name": "Microsoft"},
+    {"symbol": "GOOGL", "name": "Google"},
+]
+
+ALPACA_LEADERS = [
+    {"symbol": "AAPL",  "name": "Apple",     "reason": "أكبر شركة في S&P500"},
+    {"symbol": "MSFT",  "name": "Microsoft", "reason": "ثاني أكبر شركة"},
+    {"symbol": "GOOGL", "name": "Google",    "reason": "قطاع التكنولوجيا"},
+    {"symbol": "NVDA",  "name": "Nvidia",    "reason": "يقود قطاع AI"},
+    # NVDA مو في البيضاء = يراقب فقط
+]
+```
+
+---
+
+## مثال 3 — Coinbase (مستقبلي)
+
+```python
+class CoinbaseMarket(BaseMarket):
+    name = "Coinbase"
+    type = "crypto"
+    
+    # URLs ثابتة في الكود
+    WATCH_URL = "wss://advanced-trade-ws.coinbase.com"
+    CONTROL_URL = "https://api.coinbase.com"
+    HISTORICAL_URL = "https://api.coinbase.com"
+    
+    async def get_price(self, symbol):
+        # BTC-USD → 42,350$
+        response = await self.client.get(
+            f"{self.CONTROL_URL}/api/v3/brokerage/products/{symbol}/ticker"
+        )
+        return float(response["trades"][0]["price"])
+    
+    async def buy(self, symbol, amount):
+        return await self.client.post(
+            f"{self.CONTROL_URL}/api/v3/brokerage/orders",
+            data={
+                "product_id": symbol,
+                "side": "BUY",
+                "order_configuration": {
+                    "market_market_ioc": {
+                        "quote_size": str(amount)
+                    }
+                }
+            }
+        )
+
+# القوائم لـ Coinbase
+COINBASE_WHITELIST = [
+    {"symbol": "BTC-USD", "name": "Bitcoin"},
+    {"symbol": "ETH-USD", "name": "Ethereum"},
+]
+
+COINBASE_LEADERS = [
+    {"symbol": "BTC-USD", "name": "Bitcoin", "reason": "يقود السوق"},
+]
+```
+
+---
+
+## الكلاس العام (BaseMarket)
+
+```python
+class BaseMarket:
+    name: str
+    type: str
+    
+    async def get_price(self, symbol: str) -> float:
+        raise NotImplementedError
+    
+    async def watch_price(self, symbol: str, callback):
+        raise NotImplementedError
+    
+    async def buy(self, symbol: str, amount: float) -> dict:
+        raise NotImplementedError
+    
+    async def sell(self, symbol: str, amount: float) -> dict:
+        raise NotImplementedError
+    
+    async def get_balance(self) -> float:
+        raise NotImplementedError
+    
+    async def place_stop_loss(self, symbol: str, price: float):
+        raise NotImplementedError
+    
+    async def get_historical(
+        self, symbol: str,
+        start: str, end: str,
+        timeframe: str = "4h"
+    ) -> pd.DataFrame:
+        raise NotImplementedError
+    
+    async def test_connection(self) -> dict:
+        results = {
+            "watch": False,
+            "control": False,
+            "historical": False
+        }
+        try:
+            await self.get_price("BTC/USDT")
+            results["watch"] = True
+        except: pass
+        
+        try:
+            await self.get_balance()
+            results["control"] = True
+        except: pass
+        
+        try:
+            await self.get_historical("BTC/USDT", "2024-01-01", "2024-01-02")
+            results["historical"] = True
+        except: pass
+        
+        return results
+```
+
+---
+
+## كيف يستخدمه الموظف
+
+```python
+class Worker:
+    market: BaseMarket
+    
+    async def scan(self):
+        symbols = get_symbols_for_worker(self.market.id)
+        
+        # يتداول فقط في البيضاء
+        for symbol in symbols["tradeable"]:
+            price = await self.market.get_price(symbol)
+            if self.should_enter(price):
+                await self.market.buy(symbol, self.trade_size)
+                await self.market.place_stop_loss(symbol, self.sl_price)
+        
+        # يراقب فقط القياديين لتحديد الاتجاه
+        for symbol in symbols["direction"]:
+            price = await self.market.get_price(symbol)
+            self.update_market_direction(symbol, price)
+
+# نفس الكود — منصات مختلفة ✅
+worker_binance = Worker(market=BinanceMarket())
+worker_alpaca = Worker(market=AlpacaMarket())
+```
+
+---
+
+## اختبار الاتصال في الواجهة
+
+```
+لما تضغط "اختبار الاتصال":
+
+API المتابعة:        ✅ متصل | ❌ فشل
+API التحكم:          ✅ متصل | ❌ فشل
+API البيانات القديمة: ✅ متصل | ❌ فشل
+
+الكل ✅ → يظهر زر "إضافة المنصة" ✅
+فيه ❌ → يظهر سبب الفشل وكيف تصلحه
+```
+
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 صمامات الامان  🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+ صمامات الأمان (11)
+
+---
+
+## الفكرة الأساسية
+
+```
+كل صمام = طبقة حماية مستقلة
+لو طبقة فشلت — الطبقة التالية تحمي
+11 طبقة = صعب جداً تخترق الكل
+```
+
+---
+
+## 1. فحص السوق كل 15 دقيقة
+
+```
+Python يفحص ATR + Bollinger + Volume
+كل 15 دقيقة بدون توقف
+        ↓
+السوق متوتر؟ → يوقف المستقر ويشغّل المتوتر
+السوق مستقر؟ → يوقف المتوتر ويشغّل المستقر
+        ↓
+ما تدخل صفقة في بيئة خاطئة
+```
+
+---
+
+
+## 2. نظام الطبقتين
+
+```
+قبل كل صفقة:
+الطبقة 1 (مجاني): Fear&Greed + CryptoPanic + BTC Dominance
+لو فشل → ما يدخل ❌
+
+لو نجح → الطبقة 2 (AI)
+لو فشل → ما يدخل ❌
+
+لو نجح → يدخل ✅
+```
+
+---
+
+## 3. Backtesting 7 سنوات
+
+```
+قبل ما يشتغل أي موظف:
+الاستراتيجية تُختبر على 7 سنوات تاريخية
+Sharpe > 1 | Drawdown < 15% | Win Rate > 50%
+        ↓
+فشلت؟ → ما تُبنى موظفين ❌
+
+نجحت؟ → تكمل للخطوة التالية ✅
+```
+
+---
+
+## 4. Walk-Forward 3 سنوات
+
+```
+بعد Backtesting:
+تُختبر على 3 سنوات جديدة ما شافتها
+        ↓
+فشلت؟ → ما تُبنى موظفين ❌
+نجحت؟ → تكمل ✅
+```
+
+---
+
+## 5. Paper Trading إلزامي
+
+```
+لا موظف حقيقي بدون موظف وهمي ناجح
+        ↓
+الموظف الوهمي يثبت نفسه أولاً
+أنت تقرر متى يكفي
+بعدين تضغط الترقية يدوياً
+
+```
+
+---
+
+## 6. قاعدة 1% مخاطرة قصوى
+
+```
+مهما كانت الفرصة:
+كل صفقة = 1% من رأس المال كحد أقصى
+
+مثال:
+رأس المال: 10,000$
+أكبر خسارة في صفقة واحدة: 100$
+        ↓
+حتى لو خسرت 10 صفقات متتالية:
+خسرت 1,000$ فقط (10%)
+ما راح تفلس
+```
+
+---
+
+## 7. Trailing Stop + Stop Loss ثابت
+
+```
+Trailing Stop (متحرك):
+
+يشتغل لما الصقر شغّال
+لو السعر ارتفع → وقف الخسارة يرتفع معه
+يحمي الربح ✅
+
+Stop Loss ثابت (على المنصة):
+يشتغل حتى لو الصقر مات
+محفوظ على Binance/Alpaca مباشرة
+لو الإنترنت انقطع → المنصة تغلق ✅
+```
+
+---
+
+## 8. سجل أسباب الفشل والإيقاف اليدوي
+
+```
+كل فشل يُسجّل:
+"استراتيجية X فشلت — السبب: Drawdown عالي وقت الفيد"
+        ↓
+الاجتماع القادم يقرأ السجل:
+"ممنوع تكرار هذه الأنماط"
+        ↓
+لا تتكرر نفس الأخطاء ✅
+
+كل إيقاف يدوي يُسجّل:
+
+"أوقفت موظف 1 — السبب: خبر طارئ"
+المستشار والاجتماع يقرأون هذا لاحقاً
+```
+
+---
+
+## 9. زر الطوارئ + زر الإيقاف
+
+```
+زر أصفر (إيقاف ناعم):
+لا دخول صفقات جديدة
+الموجودة تكمل للهدف أو وقف الخسارة
+مثال: "أبي أراجع الأداء — لكن ما أبي أخسر الصفقات القائمة"
+
+زر أحمر (إيقاف فوري):
+يغلق كل الصفقات الحين بسعر السوق
+حتى لو بخسارة
+مثال: "خبر كارثي — اخرج الحين!"
+```
+
+---
+
+## 10. موافقتك اليدوية
+
+```
+كل قرار مصيري يحتاج ضغطتك:
+
+✅ اعتماد الاجتماع
+✅ ترقية موظف للحقيقي
+✅ اعتماد تبديل السوق
+✅ قبول/رفض سحب خارجي
+
+النظام لا يتصرف وحده في القرارات الكبيرة
+```
+
+---
+
+## 11. نسخة احتياطية محلية للصفقات
+
+```
+كل صفقة تُحفظ:
+أولاً: محلياً على السيرفر ✅
+ثانياً: في Supabase ✅
+
+لو Supabase تعطّل:
+النسخة المحلية موجودة
+لما Supabase يرجع → تُرفع تلقائياً
+لا تضيع أي صفقة ✅
+```
+
+---
+
+## ملخص للمبرمج
+
+```python
+class SafetyValves:
+    
+    # 1: فحص السوق
+    MARKET_CHECK_INTERVAL = 15  # دقيقة
+    
+    # 2: الطبقتان
+    LAYER_1_FREE = True
+    LAYER_2_AI_COST = 0.02  # $/فرصة
+    
+    # 3 + 4: Backtesting + Walk-Forward
+    BACKTEST_YEARS = 7
+    WALKFORWARD_YEARS = 3
+    MIN_SHARPE = 1.0
+    MAX_DRAWDOWN = 0.15
+    MIN_WIN_RATE = 0.50
+    
+    # 5: Paper Trading
+    PAPER_REQUIRED = True
+    UPGRADE_MANUAL = True  # يدوي دايماً
+    
+    # 6: قاعدة 1%
+    MAX_RISK_PER_TRADE = 0.01  # 1%
+
+    
+    # 7: Stop Loss
+    TRAILING_STOP = True
+    FIXED_STOP_ON_PLATFORM = True  # مستقل عن الصقر
+    
+    # 8: سجل الفشل
+    LOG_FAILURES = True
+    LOG_MANUAL_STOPS = True
+    
+    # 9: أزرار الإيقاف
+    SOFT_STOP = "yellow"   # لا دخول جديد
+    EMERGENCY_STOP = "red" # يغلق الكل فوراً
+    
+    # 10: موافقة يدوية
+    MANUAL_APPROVAL_REQUIRED = [
+        "session_approval",
+        "live_upgrade",
+        "market_switch",
+        "external_withdrawal"
+    ]
+    
+    # 11: نسخة احتياطية
+    LOCAL_BACKUP = True
+    AUTO_SYNC_ON_RECOVERY = True
+
+```
+
+---
+
+جاهز للقسم التالي! 🎯
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 الاشعارات بالتلقرام 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+---
+
+
+# كل تنبيهات تليجرام في الصقر
+
+---
+
+## للمستخدم (Owner)
+
+### تنبيهات السوق:
+```
+⚠️ السوق تحوّل من مستقر إلى متوتر
+تم التبديل — ردّ خلال 5 دقائق
+✅ موافق | ❌ رفض | ⏹️ إيقاف الكل
+في حالة عدم الرد يتحول تلقائي من متوتر الى مستقر والعكس
+```
+
+### تنبيهات الصفقات:
+```
+✅ دخول صفقة: [الموظف] اشترى [الزوج] بـ [السعر]
+
+✅ خروج بربح: [الموظف] باع [الزوج] ربح [المبلغ]
+
+❌ خروج بخسارة: [الموظف] باع [الزوج] خسر [المبلغ]
+
+⚠️ تقليص سيولة:
+[الموظف] | [الزوج]
+
+المطلوب: X$ | الفعلي: Y$
+السبب: سيولة منخفضة
+الصفقات المتبقية: Z
+```
+
+### تنبيهات الاجتماع:
+```
+✅ جاهز
+(بعد اكتمال الجلسة كاملاً)
+
+❌ فشل Backtesting
+السبب: Drawdown = 22%
+تبي جلسة جديدة؟ نعم | لا
+
+❌ فشل Walk-Forward
+السبب: Win Rate = 43%
+تبي جلسة جديدة؟ نعم | لا
+
+⚠️ Grok ما يرد — وقت صفقة
+فرصة [الزوج] تنتظر
+نعم = ادخل | لا = تجاهل
+
+⚠️ Grok ما يرد — وقت اجتماع
+الاجتماع متوقف
+نعم = أعد | لا = إلغِ
+
+
+⚠️ [اسم الخبير] ما يرد
+الاجتماع متوقف
+نعم = أعد | لا = إلغِ
+```
+
+### تنبيهات الموظفين:
+```
+✅ موظف جديد شغّال: [الاسم]
+
+⚠️ [الموظف] توقف فجأة — سبب غير معروف
+
+🚨 خبر كارثي على CryptoPanic
+تم إيقاف كل الموظفين فوراً
+```
+
+### تنبيهات الرصيد:
+```
+✅ أُضيف X$ للرصيد المحرر
+(إيداع خارجي اكتُشف)
+
+⚠️ رصيد Binance نقص X$
+USDT الحر المتاح: Y$
+من وين أخصم؟
+من الرصيد المحرر | من موظف محدد | وزّع على الكل
+
+```
+
+### التقارير الدورية:
+```
+📊 تقرير يومي:
+أفضل موظف: [الاسم] +X$
+أسوأ موظف: [الاسم] -X$
+إجمالي اليوم: +/- X$
+عدد الصفقات: X
+
+📊 تقرير أسبوعي:
+ملخص الأسبوع كامل
+توصية المستشار: [النص]
+```
+
+### تنبيهات السيرفر:
+```
+⚠️ السيرفر وقع — رجع الآن
+تم مزامنة X صفقة
+```
+
+---
+
+## للأدمن فقط
+
+### تنبيهات المستخدمين:
+```
+🆕 مستخدم جديد ينتظر الموافقة:
+الاسم: [الاسم]
+الإيميل: [الإيميل]
+الموبايل: [الرقم]
+✅ قبول | ❌ رفض
+```
+
+### تنبيهات التوكنات:
+```
+⚠️ تنبيه: OpenRouter
+الرصيد الحالي: X$
+متوقع ينتهي خلال: X يوم
+
+⚠️ تنبيه: Grok API
+الرصيد الحالي: X$
+متوقع ينتهي خلال: X يوم
+
+⚠️ تنبيه: Claude API
+الرصيد الحالي: X$
+متوقع ينتهي خلال: X يوم
+
+⚠️ تنبيه: DeepSeek API
+الرصيد الحالي: X$
+
+متوقع ينتهي خلال: X يوم
+```
+
+### تنبيهات API:
+```
+⚠️ [اسم API] فشل 3 مرات متتالية
+تم إيقاف الموظفين — تحقق فوراً
+
+⚠️ Binance API تغيّر
+الكود القديم لا يشتغل — تحقق فوراً
+```
+
+---
+
+## للمبرمج
+
+```python
+class TelegramNotifications:
+    
+    # السوق
+    MARKET_SWITCH = "⚠️ السوق تحوّل {from} → {to}"
+    
+    # الصفقات
+    TRADE_ENTRY = "✅ دخول: {worker} | {pair} | {price}"
+
+    TRADE_PROFIT = "✅ ربح: {worker} | {pair} | +{amount}"
+    TRADE_LOSS = "❌ خسارة: {worker} | {pair} | -{amount}"
+    TRADE_TRIMMED = "⚠️ تقليص: {worker} | طلب {req}$ | دخل {actual}$"
+    
+    # الاجتماع
+    SESSION_DONE = "✅ جاهز"
+    SESSION_BACKTEST_FAIL = "❌ فشل Backtesting | {reason}"
+    SESSION_WALKFORWARD_FAIL = "❌ فشل Walk-Forward | {reason}"
+    GROK_TIMEOUT_TRADE = "⚠️ Grok ما يرد | فرصة {pair}"
+    GROK_TIMEOUT_SESSION = "⚠️ Grok ما يرد | الاجتماع متوقف"
+    EXPERT_TIMEOUT = "⚠️ {expert} ما يرد | الاجتماع متوقف"
+    
+    # الموظفون
+    WORKER_STARTED = "✅ موظف جديد: {name}"
+    WORKER_STOPPED = "⚠️ {name} توقف فجأة"
+    CRITICAL_NEWS = "🚨 خبر كارثي | تم إيقاف الكل"
+    
+
+    # الرصيد
+    DEPOSIT_DETECTED = "✅ أُضيف {amount}$ للرصيد المحرر"
+    WITHDRAWAL_DETECTED = "⚠️ نقص {amount}$ | من وين أخصم؟"
+    
+    # السيرفر
+    SERVER_RECOVERED = "⚠️ السيرفر رجع | تمت مزامنة {count} صفقة"
+    
+    # للأدمن
+    NEW_USER = "🆕 مستخدم جديد: {name} | {email}"
+    API_BALANCE_LOW = "⚠️ {api} | رصيد {amount}$ | ينتهي خلال {days} يوم"
+    API_FAILED = "⚠️ {api} فشل 3 مرات | تحقق فوراً"
+```
+
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 نظام الارصده  🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+— نظام الأرصدة
+## شرح لـ Antigravity بالتفصيل
+
+---
+
+## الفكرة الأساسية
+
+```
+كل موظف = محفظة مستقلة تماماً
+لا يشارك فلوسه مع أحد
+ربحه وخسارته لوحده
+```
+
+---
+
+## الأرصدة في الواجهة
+
+```
+عادي مستقر 1:    1,250$ (شغّال) 🟢
+عادي مستقر 2:      890$ (شغّال) 🟢
+مطور متوتر 1:    1,100$ (شغّال) 🟢
+قناص 1:            480$ (شغّال) 🟢
+        ↓
+رصيد محرر:         320$ 💰
+(لا يلمسه أحد — ينتظرك)
+```
+
+---
+
+## زر تحرير مبلغ
+
+**ليش تحرير وليس سحب مباشر؟**
+
+```
+الموظف عنده فلوس داخل صفقات مفتوحة
+ما تقدر تسحب من صفقة مفتوحة
+        ↓
+التحرير = تقول للموظف:
+"خصم X$ من حصتك — لما تقفل صفقاتك"
+الموظف يكمل عمله بالمبلغ الباقي
+```
+
+**مثال:**
+```
+عادي مستقر 1 عنده 1,250$:
+صفقة A: 300$ (مفتوحة)
+صفقة B: 200$ (مفتوحة)
+صفقة C: 150$ (مفتوحة)
+نقدي حر: 600$
+        ↓
+أنت تطلب تحرير 800$
+        ↓
+الـ 600$ النقدي → رصيد محرر فوراً ✅
+        ↓
+صفقة A تقفل → الـ 300$ تروح للرصيد المحرر ✅
+        ↓
+وصلنا 900$ في الرصيد المحرر
+(أكثر من 800$ المطلوبة)
+
+الموظف يكمل بالباقي: 350$
+```
+
+---
+
+## قواعد الرصيد المحرر
+
+```
+✅ لا يلمسه أي موظف
+✅ لا يدخل في أي صفقة
+✅ لا يتأثر بتبديل السوق
+✅ تسحبه متى تبي
+✅ يبقى معزولاً حتى تقرر
+```
+
+---
+
+## مثال كامل في الواجهة
+
+```
+قبل التحرير:
+عادي مستقر 1: 1,250$ (شغّال)
+رصيد محرر: 0$
+
+أنت تضغط "تحرير مبلغ"
+
+تكتب: 500$
+تضغط تأكيد
+        ↓
+مباشرة:
+عادي مستقر 1: 750$ (شغّال — تقلّصت)
+رصيد محرر: 500$ 💰
+
+الصفقات المفتوحة؟
+تكمل طبيعياً من الـ 750$ ✅
+```
+
+---
+
+## للمبرمج
+
+```python
+class WorkerBalance:
+    worker_id: str
+    total_capital: float      # كل الفلوس
+    active_in_trades: float   # داخل صفقات مفتوحة
+    free_cash: float          # نقدي حر
+    
+    @property
+    def available(self):
+        return self.free_cash  # المتاح للتداول
+
+
+class ReleasedBalance:
+    amount: float    # المبلغ المحرر
+    # لا يلمسه أحد — لا يدخل في أي حساب
+
+def release_amount(worker_id: str, amount: float):
+    worker = get_worker(worker_id)
+    
+    # تقليص حصة الموظف فوراً
+    worker.total_capital -= amount
+    
+    # النقدي الحر يروح للرصيد المحرر فوراً
+    immediate = min(worker.free_cash, amount)
+    released_balance.add(immediate)
+    worker.free_cash -= immediate
+    
+    remaining = amount - immediate
+    
+    if remaining > 0:
+        # الباقي ينتظر إغلاق الصفقات
+        worker.pending_release += remaining
+    
+def on_trade_close(trade):
+    worker = get_worker(trade.worker_id)
+    
+
+    if worker.pending_release > 0:
+        # فلوس الصفقة تروح للرصيد المحرر
+        to_release = min(trade.amount, worker.pending_release)
+        released_balance.add(to_release)
+        worker.pending_release -= to_release
+        
+        # الباقي يرجع للموظف
+        worker.free_cash += (trade.amount - to_release)
+    else:
+        # لا يوجد تحرير — كل الفلوس ترجع للموظف
+        worker.free_cash += trade.amount
+```
+
+---
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 اضافة سيناريو 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+# سيناريو الإيداع والسحب خارج الصقر
+## شرح لـ Antigravity بالتفصيل
+
+---
+
+## القاعدة الأساسية
+
+```
+Binance لا يعرف شيء عن الصقر
+بالنسبة له = رصيد واحد فقط
+
+        ↓
+أي إيداع أو سحب خارج الصقر
+الصقر يكتشفه ويتصرف
+```
+
+---
+
+## الإيداع — أودعت بالغلط أو بالعمد
+
+```
+أودعت 500$ في Binance مباشرة
+        ↓
+الصقر يكتشف الفرق خلال دقائق:
+Binance: 9,500$ | الصقر: 9,000$
+        ↓
+الـ 500$ تروح للرصيد المحرر تلقائياً ✅
+        ↓
+من داخل الصقر أنت تقرر:
+تحوّلها لموظف معين
+أو تتركها في الرصيد المحرر
+```
+
+---
+
+## السحب — سحبت بالغلط أو استعجلت
+
+
+```
+سحبت 1,000$ من Binance مباشرة
+        ↓
+الصقر يكتشف الفرق فوراً:
+Binance: 8,000$ | الصقر: 9,000$
+فرق: -1,000$
+        ↓
+تليجرام ينبهك:
+"⚠️ رصيد Binance نقص 1,000$
+الـ USDT الحر المتاح: 1,400$
+من وين أخصمها؟"
+
+1️⃣ من الرصيد المحرر
+2️⃣ من موظف محدد
+3️⃣ وزّع على الكل بالتساوي
+```
+
+---
+
+## قاعدة الخصم
+
+```
+الصقر يخصم من USDT الحر فقط ✅
+        ↓
+
+لماذا؟
+الصفقة القائمة = اشترى BTC بالفعل
+الـ USDT راح وجاء BTC بدله
+BTC محجوز في السوق — ما نلمسه
+
+يعني:
+USDT حر = نقدر نخصم منه ✅
+BTC داخل صفقة = ما نلمسه ❌
+```
+
+---
+
+## مثال كامل
+
+```
+الوضع:
+عادي مستقر 1: 1,000$
+  - داخل صفقات (BTC): 600$
+  - USDT حر: 400$
+
+عادي مستقر 2: 800$
+  - داخل صفقات (BTC): 300$
+  - USDT حر: 500$
+
+رصيد محرر: 200$
+
+إجمالي USDT الحر: 1,100$
+        ↓
+سحبت 800$ من Binance بالغلط
+        ↓
+تليجرام:
+"⚠️ نقص 800$
+USDT الحر المتاح: 1,100$
+من وين أخصم؟"
+
+اخترت: من الرصيد المحرر + موظف 1
+200$ من الرصيد المحرر
+600$ من USDT الحر لموظف 1
+        ↓
+النتيجة:
+رصيد محرر: 0$
+عادي مستقر 1: 400$ (يكمل بصفقاته القائمة)
+عادي مستقر 2: 800$ (ما تأثر) ✅
+```
+
+---
+
+## للمبرمج
+
+```python
+def monitor_binance_balance():
+    binance_total = binance.get_usdt_balance()
+
+    saqr_total = get_saqr_total_usdt()
+    diff = saqr_total - binance_total
+    
+    if diff > 0:
+        # نقص في Binance = سحب خارجي
+        handle_external_withdrawal(diff)
+    
+    elif diff < 0:
+        # زيادة في Binance = إيداع خارجي
+        released_balance.add(abs(diff))
+        notify_telegram(f"✅ أُضيف {abs(diff)}$ للرصيد المحرر")
+
+def handle_external_withdrawal(amount):
+    available_usdt = get_free_usdt_all_workers()
+    
+    notify_telegram(
+        f"⚠️ نقص {amount}$ في Binance\n"
+        f"USDT الحر المتاح: {available_usdt}$\n"
+        f"من وين أخصم؟",
+        buttons=[
+            "من الرصيد المحرر",
+            "من موظف محدد", 
+            "وزّع على الكل"
+        ]
+
+    )
+
+def deduct_from_worker(worker_id, amount):
+    worker = get_worker(worker_id)
+    # يخصم من USDT الحر فقط
+    if worker.free_usdt >= amount:
+        worker.free_usdt -= amount
+    else:
+        notify_telegram("⚠️ USDT الحر غير كافٍ")
+```
+
+---
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 سيناريوهات افتراضيه 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+
+## السيناريو 1 — انقطاع الإنترنت
+
+**المشكلة:**
+```
+الصقر ما يقدر يتواصل مع Binance/Alpaca
+الصفقات مفتوحة — مين يراقبها؟
+```
+
+**الحل:**
+```
+عند كل صفقة جديدة:
+الصقر يرسل Stop Loss ثابت للمنصة مباشرة
+        ↓
+Binance/Alpaca يحفظه عندهم
+        ↓
+لو الإنترنت انقطع:
+المنصة تغلق الصفقة تلقائياً عند حد الخسارة
+بدون ما تحتاج الصقر ✅
+```
+
+**كود:**
+```python
+def place_trade(symbol, amount):
+    # يرسل الأمر + Stop Loss للمنصة دفعة واحدة
+    order = {
+        "symbol": symbol,
+        "amount": amount,
+
+        "stop_loss": calculate_stop_loss(),
+        # Stop Loss محفوظ على المنصة — مستقل عن الصقر
+    }
+    binance.place_order_with_stop(order)
+```
+
+---
+
+## السيناريو 2 — المنصة تنهار (Binance/Alpaca)
+
+**المشكلة:**
+```
+المنصة نفسها تنهار
+الصفقات محجوزة — ما نقدر نتحكم
+```
+
+**الحل الحالي:**
+```
+ما عندنا حل كامل الحين ❌
+الفلوس تنتظر حتى المنصة ترجع
+```
+
+**الحل المستقبلي (ROADMAP):**
+```
+
+تنويع المنصات:
+Binance + Coinbase + Kraken
+لو واحدة نهارت → الثانية تكمل
+```
+
+---
+
+## السيناريو 3 — Grok ينقطع وقت صفقة
+
+**المشكلة:**
+```
+موظف شاف فرصة
+أرسل للطبقة 2 (Grok) يسأل
+Grok ما رد!
+```
+
+**الحل:**
+```
+انتظر 30 ثانية
+        ↓
+Grok ما رد؟
+        ↓
+تليجرام يجيك:
+"⚠️ Grok ما يرد
+فرصة BTC/USDT تنتظر
+
+نعم = ادخل بالطبقة 1 فقط
+لا = تجاهل الفرصة"
+        ↓
+سكت = ما يدخل ❌
+```
+
+---
+
+## السيناريو 4 — Grok ينقطع وقت الاجتماع
+
+**المشكلة:**
+```
+الاجتماع بدأ
+المذيع والنبّاض (Grok) ما يردون
+الخبراء ناقصين!
+```
+
+**الحل:**
+```
+الاجتماع يوقف فوراً ⏸️
+        ↓
+تليجرام:
+"⚠️ Grok ما يرد — الاجتماع متوقف
+نعم = أعد المحاولة
+لا = إلغِ الاجتماع"
+
+        ↓
+سكت = ملغي ❌
+```
+
+---
+
+## السيناريو 5 — خبر كارثي
+
+**المشكلة:**
+```
+خبر سيء جداً على CryptoPanic
+السوق ينهار بسرعة
+الموظفون مفتوحون!
+```
+
+**الحل:**
+```python
+def check_cryptopanic():
+    news = get_cryptopanic_news()
+    
+    if news.risk_level == "high":
+        # يوقف الكل فوراً
+        stop_all_workers()
+        
+        # للقناص تحديداً — أسرع
+
+        sniper.emergency_stop()
+        
+        notify_telegram(
+            "🚨 خبر كارثي على CryptoPanic
+             تم إيقاف كل الموظفين فوراً"
+        )
+```
+
+---
+
+## السيناريو 6 — Supabase يتعطل
+
+**المشكلة:**
+```
+الموظف أغلق صفقة
+حاول يسجّلها في Supabase
+Supabase ما يرد!
+```
+
+**الحل:**
+```python
+def save_trade(trade):
+    # أولاً: يحفظ محلياً على السيرفر
+    local_backup.save(trade)
+    
+
+    try:
+        # ثانياً: يحاول Supabase
+        supabase.insert(trade)
+        local_backup.mark_synced(trade.id)
+    
+    except SupabaseError:
+        # Supabase فشل — النسخة المحلية موجودة
+        # لما Supabase يرجع → يرفع تلقائياً
+        schedule_retry(trade)
+```
+
+---
+
+## السيناريو 7 — تغيير API المنصة
+
+**المشكلة:**
+```
+Binance أو Alpaca غيّرت API بدون إشعار
+الكود القديم ما يشتغل
+الموظفون يحاولون يتداولون — كل شيء يفشل بصمت!
+```
+
+**الحل:**
+```python
+# المستشار يراقب كل استدعاء API
+def monitor_api_calls():
+
+    failures = count_consecutive_failures()
+    
+    if failures >= 3:
+        notify_telegram(
+            "⚠️ Binance API فشل 3 مرات متتالية
+             ممكن تغيير في الـ API
+             تحقق فوراً"
+        )
+        pause_all_workers()
+```
+
+---
+
+## السيناريو 8 — السيرفر ينهار (Railway)
+
+**المشكلة:**
+```
+السيرفر كاملاً وقع
+الصقر ما يشتغل
+الصفقات مفتوحة بدون مراقبة!
+```
+
+**الحل:**
+```
+نفس السيناريو 1:
+
+Stop Loss ثابت محفوظ على المنصة ✅
+Binance/Alpaca يراقبون ويغلقون عند الحد
+        ↓
+لما السيرفر يرجع:
+الصقر يقرأ الصفقات المغلقة من المنصة
+يسجّلها في Supabase
+يكمل من حيث توقف
+        ↓
+تليجرام ينبهك بعد 30 دقيقة من الانقطاع:
+"⚠️ السيرفر وقع — رجع الآن
+تم مزامنة X صفقة"
+```
+
+---
+
+## ملخص للمبرمج
+
+```python
+class EmergencyProtocol:
+    
+    # S1 + S8: Stop Loss مستقل على المنصة
+    def place_with_stop_loss(self, order):
+        order["stop_loss"] = self.calculate_sl()
+        platform.place_order(order)  # المنصة تحفظه
+    
+
+    # S3: Grok ينقطع وقت صفقة
+    def handle_grok_timeout(self, opportunity):
+        await asyncio.sleep(30)
+        if not grok.responded:
+            notify_telegram(opportunity, buttons=["نعم", "لا"])
+            # سكت = ما يدخل
+    
+    # S4: Grok ينقطع وقت الاجتماع
+    def handle_grok_during_meeting(self):
+        pause_meeting()
+        notify_telegram("Grok ما يرد", buttons=["أعد", "إلغِ"])
+    
+    # S5: خبر كارثي
+    def handle_critical_news(self):
+        stop_all_workers()
+        notify_telegram("🚨 خبر كارثي — تم الإيقاف")
+    
+    # S6: Supabase يتعطل
+    def save_trade_safely(self, trade):
+        local_backup.save(trade)  # أولاً محلي
+        retry_supabase_later(trade)  # ثانياً Supabase
+    
+    # S7: تغيير API
+
+    def monitor_api_health(self):
+        if consecutive_failures >= 3:
+            pause_workers()
+            notify_telegram("⚠️ API تغيّر")
+```
+
+---
+
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 الحسابات والباقات 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+# القسم 19 — نظام المستخدمين والباقات
+## شرح لـ Antigravity بالتفصيل
+
+---
+
+## الأدوار الثلاثة
+
+### Admin:
+```
+الشخص الوحيد اللي يتحكم بكل شيء
+
+يقدر يسوي:
+✅ ينشئ يوزرات جديدة
+✅ يقبل أو يرفض طلبات التسجيل
+✅ يحدد باقة كل يوزر ( فقط المجاني هو المفعل )
+✅ يدير الباقات (يضيف/يعدّل)
+✅ يشوف استهلاك التوكنات لكل يوزر 
+✅ يشوف كل بيانات المنصة
+```
+
+### Owner:
+```
+صاحب الحساب العادي
+
+يقدر يسوي:
+✅ يشغّل موظفيه ويوقفهم
+
+✅ يعقد اجتماعات الخبراء
+✅ يشوف تحليلاته وصفقاته
+✅ يربط API الخاصة فيه
+✅ يشوف رصيده وتوكناته (الخانات موجوده وغير مفعله)
+
+ما يقدر:
+❌ يشوف بيانات يوزر ثاني
+❌ ينشئ يوزرات
+❌ يعدّل الباقات
+```
+
+---
+
+## رحلة المستخدم الجديد
+
+### الخطوة 1 — التسجيل:
+```
+المستخدم يملأ:
+الاسم + الإيميل + الموبايل + الباسوورد
+        ↓
+حسابه = pending (ينتظر)
+ما يقدر يدخل
+```
+
+### الخطوة 2 — تليجرام للأدمن:
+
+```
+"🆕 مستخدم جديد ينتظر الموافقة:
+الاسم: محمد العنزي
+الإيميل: m@email.com
+الموبايل: +965xxxxxxxx"
+
+أزرار:
+✅ قبول | ❌ رفض
+```
+
+### الخطوة 3 — عند القبول:
+```
+الأدمن يختار الباقة:
+☐ مجاني → مفعّل فوراً ✅
+☐ باقة 1 → زر موجود لكن غير مفعّل
+☐ باقة 2 → زر موجود لكن غير مفعّل
+☐ باقة 3 → زر موجود لكن غير مفعّل
+
+الباقات المدفوعة = تنتظر ربط Payment Method لاحقاً
+```
+
+---
+
+## إدارة الباقات (Admin فقط)
+
+### شكل كل باقة:
+```
+اسم الباقة: [فراغ]
+هامش ربح التوكنات: .....%
+(مثال: 20% — لو التوكن كلّف 1$ يدفع 1.2$)
+
+اشتراك شهري: .....$
+(مثال: 30$/شهر)
+
+نسبة من أرباح التداول: .....%
+(مثال: 10% من كل ربح)
+
+حد أدنى للشحن: .....$
+(مثال: لا يشحن أقل من 50$)
+
+تنبيه عند: .....$
+(مثال: لما يبقى 20$ → ينبّه المستخدم)
+
+إيقاف عند: .....$
+(مثال: لما يوصل 5$ → يوقف الخدمة)
+```
+
+**زر: [+ إضافة باقة جديدة]**
+
+### مثال عملي:
+
+```
+باقة 1 — أساسية:
+هامش التوكنات: 15%
+اشتراك: 20$/شهر
+نسبة الأرباح: 5%
+حد أدنى للشحن: 30$
+تنبيه عند: 15$
+إيقاف عند: 3$
+
+باقة 2 — احترافية:
+هامش التوكنات: 10%
+اشتراك: 50$/شهر
+نسبة الأرباح: 3%
+حد أدنى للشحن: 50$
+تنبيه عند: 25$
+إيقاف عند: 5$
+```
+
+---
+
+## صفحة ربط API لكل يوزر
+
+```
+المرحلة الأولى (الحين):
+
+Binance:
+API Key: [فراغ]
+Secret Key: [فراغ]
+زر: اختبار الاتصال ✅
+
+Alpaca:
+API Key: [فراغ]
+Secret Key: [فراغ]
+☐ Paper Trading | ☐ Live Trading
+زر: اختبار الاتصال ✅
+```
+
+```
+المرحلة الثانية (ROADMAP):
+Coinbase | Kraken | OKX | Interactive Brokers
+```
+
+---
+
+## تنبيهات التوكنات للأدمن
+
+### في الواجهة:
+```
+داشبورد التوكنات:
+OpenRouter:  45.30$ | ينتهي خلال ~18 يوم
+
+Grok API:    12.50$ | ينتهي خلال ~8 أيام ⚠️
+Claude API:  88.00$ | ينتهي خلال ~35 يوم
+DeepSeek:    30.00$ | ينتهي خلال ~22 يوم
+```
+
+### على تليجرام:
+```
+"⚠️ تنبيه: Grok API
+الرصيد الحالي: 12.50$
+متوقع ينتهي خلال: 8 أيام
+الحد المحدد للتنبيه: 15$"
+```
+
+### الأدمن يحدد الحدود:
+```
+في صفحة الإعدادات:
+OpenRouter — أنبّهني عند: .....$
+Grok API — أنبّهني عند: .....$
+Claude API — أنبّهني عند: .....$
+DeepSeek — أنبّهني عند: .....$
+```
+
+---
+
+## للمبرمج
+
+
+```python
+class UserRole:
+    ADMIN = "admin"    # كل الصلاحيات
+    OWNER = "owner"    # يوزر عادي
+    VIEWER = "viewer"  # مشاهد فقط
+
+class UserStatus:
+    PENDING = "pending"   # ينتظر موافقة
+    ACTIVE = "active"     # مفعّل
+    REJECTED = "rejected" # مرفوض
+
+class Package:
+    name: str
+    token_margin: float      # هامش ربح التوكنات %
+    monthly_fee: float       # اشتراك شهري $
+    profit_share: float      # نسبة الأرباح %
+    min_recharge: float      # حد أدنى للشحن $
+    alert_threshold: float   # تنبيه عند $
+    stop_threshold: float    # إيقاف عند $
+
+# عند تسجيل مستخدم جديد
+async def on_new_registration(user):
+    user.status = UserStatus.PENDING
+    await notify_admin_telegram(
+
+        f"🆕 مستخدم جديد: {user.name}",
+        buttons=["قبول", "رفض"]
+    )
+
+# عند قبول الأدمن
+async def on_admin_approve(user, package):
+    user.status = UserStatus.ACTIVE
+    user.package = package
+    if package == "free":
+        user.is_active = True  # فوري
+    else:
+        user.is_active = False  # ينتظر Payment Method
+```
+
+---
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+
+🔴🔴🔴🔴 آلية اجتماع الخبراء 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+ — آلية اجتماع الخبراء
+## شرح لـ Antigravity بالتفصيل
+
+---
+
+## الزناد: يدوي فقط
+
+```
+لا يشتغل أبداً بدون ضغطتك
+لا توقيت أوتوماتيكي
+لا شرط يشغّله
+أنت وحدك تقرر متى
+```
+
+---
+
+## ما يجمعه Python قبل الاجتماع
+
+**OHLC:**
+```
+بيانات الأسعار (فتح، إغلاق، أعلى، أدنى)
+آخر 6 أشهر على شارتين:
+
+4 ساعات + 15 دقيقة
+```
+
+**Fear & Greed:**
+```
+مؤشر الخوف والطمع الحالي
+0-100
+مثال: 28 = خوف شديد
+```
+
+**CryptoPanic:**
+```
+أخبار الكريبتو الحالية
+مصنّفة حسب درجة الخطورة
+```
+
+**BTC Dominance:**
+```
+نسبة Bitcoin من كل سوق الكريبتو
+مثال: 54% = Bitcoin يهيمن
+```
+
+**Twitter (عبر Grok):**
+```
+مشاعر المتداولين لحظياً
+
+ماذا يقول الناس عن العملة الآن؟
+```
+
+**أداء الموظفين الحاليين:**
+```
+كيف أداء موظفيك الحاليين؟
+عادي مستقر 1: ربح 3% هذا الشهر
+عادي مستقر 2: خسر 1%
+هذا يساعد الخبراء يفهمون البيئة الحالية
+```
+
+**سجل الفشل:**
+
+```
+كل استراتيجية فشلت قبل + سبب فشلها
+يُرسل للخبراء: "هذه الأنماط أفشلت موظفين سابقين"
+```
+
+**قرارات سابقة:**
+```
+ماذا قرر الاجتماع المرة السابقة؟
+هل نجح القرار أم فشل؟
+```
+
+**أنماط 10 سنوات:**
+```
+
+مثال:
+الوضع الحالي: RSI=32 + Fear=25 + BTC يرتفع
+        ↓
+Python يبحث: كم مرة حصل هذا في 10 سنوات؟
+وجد 47 مرة مشابهة
+نجح منها 31 مرة (66%)
+متوسط الربح = +2.8%
+```
+
+---
+
+## 4 جولات النقاش
+
+**الجولة 1 — كل خبير مستقل:**
+```
+كل خبير يحلل البيانات بمفرده
+ما يرى رأي الآخرين بعد
+يعطي رأيه الخام
+```
+
+**الجولة 2 — الردود المتقاطعة:**
+```
+كل خبير يرى آراء الآخرين
+يرد عليها:
+"أوافق الشارتيست لكن المذيع غلط لأن..."
+
+"أعدّل رأيي بناءً على ما قاله الرادار..."
+```
+
+**الجولة 3 — الحارس يعترض:**
+```
+الحارس يأخذ القرار المبدئي
+يبحث عن كل أسباب فشله:
+"أرفض! — السيولة منخفضة + أخبار الفيد غداً"
+الخبراء يردون ويدافعون
+```
+
+**الجولة 4 — العادي يحسم:**
+```
+يقرأ كل النقاش
+يوازن بين الآراء
+يصدر 3 استراتيجيات نهائية
+```
+
+---
+
+## ضمان عدم التكرار
+
+```python
+# قبل كل اجتماع
+failed_strategies = get_failed_strategies()
+
+
+prompt = f"""
+هذه الاستراتيجيات فشلت من قبل:
+{failed_strategies}
+
+ممنوع اقتراح أي فكرة مشابهة لها.
+السبب: {failure_reasons}
+"""
+# يُرسل لكل خبير قبل الجولة 1
+```
+
+**مثال:**
+```
+فشلت قبل: "اشترِ لما RSI < 30 وحده"
+السبب: "السوق كان في هبوط قوي — RSI وحده لا يكفي"
+        ↓
+الخبراء يعرفون هذا → لن يقترحوا نفس الفكرة
+```
+
+---
+
+## معايير القبول
+
+```
+Sharpe Ratio > 1.0:
+
+يعني الربح يستاهل المخاطرة
+مثال: ربحت 15% بمخاطرة 10% = Sharpe 1.5 ✅
+
+Drawdown < 15%:
+أكبر خسارة متتالية ما تتجاوز 15%
+مثال: المحفظة نزلت من 1000$ لـ 870$ = 13% ✅
+
+Win Rate > 50%:
+أكثر من نصف الصفقات رابحة
+مثال: 60 صفقة رابحة من 100 = 60% ✅
+```
+
+---
+
+## للمبرمج
+
+```python
+async def run_expert_council(data, patterns):
+    
+    # إعداد السياق المشترك
+    context = {
+        "market_data": data,
+        "patterns": patterns,
+        "failed_strategies": get_failed_strategies(),
+        "current_workers_performance": 
+
+get_workers_perf()
+    }
+    
+    # الجولة 1: مستقل
+    round1 = await asyncio.gather(
+        chartist.analyze(context),
+        broadcaster.analyze(context),
+        pulse.analyze(context),
+        radar.analyze(context),
+        guardian.analyze(context),
+        detective.analyze(context)
+    )
+    
+    # الجولة 2: متقاطع
+    round2 = await cross_dialogue(round1, context)
+    
+    # الجولة 3: الحارس يعترض
+    round3 = await guardian.stress_test(round2)
+    
+    # الجولة 4: العادي يحسم
+    final = await standard.decide(
+        all_rounds=[round1, round2, round3],
+        priorities={
+            "risk": "guardian",
+
+            "timing": "chartist",
+            "news": "broadcaster"
+        }
+    )
+    
+    # التحقق من المعايير
+    if final.sharpe < 1.0 or final.drawdown > 0.15 or final.win_rate < 0.5:
+        await notify_telegram("❌ فشلت المعايير — تبي جلسة جديدة؟")
+        return None
+    
+    return final
+```
+
+---
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 المستشار  🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+ المستشار
+
+---
+
+## من هو المستشار؟
+
+```
+الخبراء = أطباء يشخصون السوق
+الموظفون = ممرضون ينفذون
+المستشار = مدير المستشفى يراقب الكل
+أنت = صاحب القرار النهائي
+```
+
+---
+
+## الدور 1: الرقابي
+
+### ماذا يراقب؟
+
+**التسلسل:**
+```
+مثال:
+الموظف حاول يدخل صفقة
+قبل ما يمر على الطبقة 1
+        ↓
+المستشار يكتشف ✅
+
+يبلغك فوراً على تليجرام:
+"⚠️ عادي مستقر 1 تجاوز الطبقة 1"
+```
+
+**التناقضات:**
+```
+مثال:
+قاعدة في الكود: "لا تدخل لما Fear&Greed > 75"
+لكن الموظف دخل وهو 80
+        ↓
+المستشار يكتشف ✅
+"⚠️ تناقض: عادي مستقر 2 دخل وFear&Greed = 80"
+```
+
+**التوقف:**
+```
+مثال:
+موظف كان يشتغل — فجأة توقف
+        ↓
+المستشار يكتشف خلال دقيقة ✅
+"⚠️ عادي متوتر 1 توقف فجأة — سبب غير معروف"
+```
+
+**استدعاءات API:**
+```python
+
+# لو فشل API 3 مرات متتالية
+if api_failures >= 3:
+    send_telegram("⚠️ Grok API فشل 3 مرات — تحقق فوراً")
+```
+
+---
+
+## الدور 2: العرّافي
+
+### ماذا يفعل؟
+
+```
+يقرأ كل بيانات Supabase
+يقارن الوضع الحالي بالتاريخ
+```
+
+**مثال:**
+```
+المستشار يلاحظ:
+عادي مستقر 1 خسر 5 صفقات متتالية
+        ↓
+يبحث في التاريخ:
+"آخر 3 مرات حصل هذا —
+النتيجة كانت: السوق على وشك التبديل"
+
+        ↓
+يبلغك:
+"💡 ملاحظة: عادي مستقر 1 في نمط خسارة متكررة
+تاريخياً هذا سبق تبديل السوق 3 مرات"
+```
+
+---
+
+## الدور 3: التنبؤي
+
+### ماذا يفعل؟
+
+```
+يكتشف المشاكل قبل ما تصير
+يقترح تطوير المنصة
+```
+
+**مثال 1 — اكتشاف مبكر:**
+```
+المستشار يلاحظ:
+تكلفة API ارتفعت 40% هذا الشهر
+        ↓
+يتنبأ:
+"⚠️ بهذا المعدل — رصيد OpenRouter سينتهي خلال 12 يوم
+
+اقتراح: فعّل Caching للطبقة 2"
+```
+
+**مثال 2 — اقتراح تطوير:**
+```
+المستشار يلاحظ:
+عادي مستقر 2 يخسر دايماً وقت أخبار الفيد
+        ↓
+يقترح:
+"💡 اقتراح: أضف فلتر أخبار الفيد لعادي مستقر 2
+الأداء قد يتحسن 15-20%"
+```
+
+---
+
+## قناتا التواصل
+
+**داخل الواجهة:**
+```
+شات مباشر مع المستشار
+تسأله: "شو رأيك بأداء عادي مستقر 1 هذا الشهر؟"
+يجاوب بتحليل كامل
+```
+
+**تليجرام:**
+
+```
+التنبيهات العاجلة تجيك فوراً
+مو محتاج تفتح الواجهة
+```
+
+---
+
+## لماذا 1M Token Context Window؟
+
+```
+المستشار يقرأ:
+- كل صفقات الموظفين
+- كل جلسات الاجتماع
+- كل سجلات الأخطاء
+- كل بيانات Supabase
+        ↓
+هذا كمية بيانات ضخمة
+1M token = يقدر يستوعب كل شيء دفعة واحدة ✅
+```
+
+---
+
+## للمبرمج
+
+```python
+
+class AdvisorAgent:
+    model = "claude-sonnet-4-6"
+    context_window = 1_000_000  # 1M token
+    
+    # الدور الرقابي
+    def monitor_sequence(self):
+        # يفحص كل 5 دقائق
+        check_layer_compliance()
+        check_api_failures()
+        check_stopped_workers()
+    
+    # الدور العرّافي
+    def pattern_analysis(self):
+        # يقارن الحاضر بالتاريخ
+        current_state = get_all_supabase_data()
+        historical_patterns = get_historical_patterns()
+        return compare_and_report(current_state, historical_patterns)
+    
+    # الدور التنبؤي
+    def predict_issues(self):
+        # يكتشف المشاكل قبل ما تصير
+        api_usage_trend = analyze_api_costs()
+        worker_performance = analyze_workers()
+
+        return generate_suggestions()
+    
+    # قنوات التواصل
+    channels = ["webapp_chat", "telegram"]
+    
+    # القرار دايماً بيد المالك
+    can_execute = False  # يقترح فقط — لا ينفذ
+```
+
+---
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 نظام الأصدقاء 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+
+
+
+
+
+ نظام الأصدقاء (Paired Bot System)
+
+
+---
+
+## الفكرة الأساسية
+
+كل موظف مستقر عنده صديق متوتر واحد فقط.
+الفلوس تتدفق بينهم أوتوماتيكياً حسب نوع السوق.
+**الهدف: ما تنام أي فلوس بدون سبب.**
+
+---
+
+## قواعد الصداقة
+
+```
+عادي مستقر  ↔ عادي متوتر 
+
+مطور مستقر  ↔ عادي متوتر 
+مطور مستقر  ↔ مطور متوتر 
+
+
+القواعد الثابتة:
+✅ كل موظف = صديق واحد فقط
+✅ لا يجوز موظف يصادق أكثر من موظف
+✅ في حال عجبنا واحد ونبي نربطه مع ثنين . نستنسخه وهو يقوم بالواجب
+```
+
+---
+
+## تدفق الفلوس — عند التبديل
+
+### مثال: السوق تحوّل من مستقر إلى متوتر
+
+```
+عادي مستقر 1 — ميزانيته 1000$:
+نقدي حر: 500$
+صفقة A: 250$ (مفتوحة)
+صفقة B: 150$ (مفتوحة)
+صفقة C: 50$ (مفتوحة)
+صفقة D: 50$ (مفتوحة)
+
+عادي متوتر 1 — ميزانيته 0$ (ينتظر)
+        ↓
+السوق تحوّل متوتر ⚠️
+        ↓
+الـ 500$ النقدي الحر → تروح للمتوتر فوراً ✅
+        ↓
+صفقة A تقفل → الـ 250$ تروح للمتوتر فوراً ✅
+صفقة B تقفل → الـ 150$ تروح للمتوتر فوراً ✅
+صفقة C تقفل → الـ 50$ تروح للمتوتر فوراً ✅
+صفقة D تقفل → الـ 50$ تروح للمتوتر فوراً ✅
+        ↓
+المتوتر يشتغل بكل فلوس تصله تدريجياً ✅
+```
+
+### العكس: السوق رجع مستقر
+
+```
+نفس المنطق بالعكس
+فلوس المتوتر تنتقل للمستقر تدريجياً
+```
+
+---
+
+## الحالة العرضية — بدون صديق
+
+```
+موظف مستقر بدون صديق متوتر:
+→ ينهي صفقاته الحالية
+→ يوقف عن الدخول الجديد
+→ ينتظر حتى يُربط بصديق او يستقر السوق
+
+موظف متوتر بدون صديق مستقر:
+→ نفس الشيء تماماً
+→ ينتظر بهدوء
+```
+
+---
+
+## القناص — مستقل تماماً
+
+```
+القناص عنده محفظته الخاصة (مثال: 500$)
+لا يرتبط بأحد
+لا يعطي فلوسه لأحد
+لا يأخذ فلوس من أحد
+
+السوق تحوّل متوتر؟
+→ القناص يوقف
+→ فلوسه تبقى عنده
+→ لما يرجع مستقر يكمل بنفس الـ 500$
+
+```
+
+---
+
+## للمبرمج
+
+```python
+class WorkerPair:
+    stable_worker_id: str    # عادي مستقر 1
+    volatile_worker_id: str  # عادي متوتر 1
+    # قاعدة: كل موظف = صديق واحد فقط
+
+def on_market_switch(new_market_type, pair):
+    if new_market_type == "volatile":
+        # نقل النقدي الحر فوراً
+        free_cash = get_free_cash(pair.stable_worker_id)
+        transfer_to(pair.volatile_worker_id, free_cash)
+
+def on_trade_close(trade, market_type, pair):
+    # كل صفقة تقفل → فلوسها تنتقل للصديق فوراً
+    if market_type == "volatile":
+        transfer_to(pair.volatile_worker_id, trade.amount)
+
+    elif market_type == "stable":
+        transfer_to(pair.stable_worker_id, trade.amount)
+
+def check_pair_exists(worker):
+    if worker.paired_with is None:
+        # بدون صديق → يوقف عن الدخول الجديد
+        worker.status = "waiting_for_pair"
+        stop_new_entries(worker)
+
+class SniperWorker:
+    paired_with = None   # مستقل تماماً
+    market_type = "stable"
+    
+    def on_market_switch(self):
+        self.status = "paused"
+        # فلوسه تبقى عنده — لا تنتقل لأحد
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم السابع  🔴🔴🔴🔴🔴🔴
+🔴🔴 شرح مفصل عن النظام العادي والمطور 🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+# القسم 9 — نظام العادي والمطور
+## شرح لـ Antigravity بالتفصيل
+
+---
+
+## العادي (standard) — Claude
+
+**من هو؟**
+القاضي النهائي في اجتماع الخبراء.
+يقرأ كل النقاش ويصدر 3 استراتيجيات.
+
+**أدواره الأربعة:**
+```
+تحليلي: يقرأ آراء الخبراء الثمانية الحالية
+عرّافي: يقارن بقرارات سابقة وما نتج عنها
+تنبؤي: يتوقع نجاح أو فشل كل استراتيجية
+حسابي: يحسب ربح محتمل ÷ مخاطرة لكل استراتيجية
+```
+
+**أولوياته الثابتة:**
+
+```
+الحارس له أولوية في المخاطر
+الشارتيست له أولوية في التوقيت
+المذيع له أولوية في الأخبار
+```
+
+**قاعدة صارمة:**
+```
+3 استراتيجيات فقط — لا أكثر لا أقل
+مرتبة حسب احتمالية النجاح:
+1. محافظة (الأعلى احتمالاً)
+2. متوسطة
+3. جريئة (الأقل احتمالاً)
+```
+
+**مثال على المخرج:**
+```json
+{
+  "strategy_1": {
+    "type": "conservative",
+    "entry": "RSI < 35 و MACD يتقاطع",
+    "target": "+2%",
+    "stop_loss": "-1%",
+    "risk_reward": 2.0,
+    "success_probability": "72%"
+
+  },
+  "strategy_2": {
+    "type": "moderate",
+    "entry": "RSI < 40",
+    "target": "+3%",
+    "stop_loss": "-1.5%",
+    "risk_reward": 2.0,
+    "success_probability": "61%"
+  },
+  "strategy_3": {
+    "type": "aggressive",
+    "entry": "RSI < 45",
+    "target": "+5%",
+    "stop_loss": "-2%",
+    "risk_reward": 2.5,
+    "success_probability": "48%"
+  }
+}
+```
+
+---
+
+## المطور (advanced) — LSTM via Keras
+
+**من هو؟**
+
+نموذج تعلم آلي يتعلم من صفقاتنا الحقيقية.
+
+**كيف يختلف عن العادي؟**
+```
+العادي: يفكر بناءً على النقاش والتاريخ العام
+المطور: يفكر بناءً على صفقاتنا نحن تحديداً
+```
+
+**كيف يشتغل؟**
+```
+يدخل اجتماع الخبراء كخبير تاسع
+يستمع للنقاش كاملاً
+يضيف رأيه بناءً على ذاكرته:
+"هذا النمط نجح عندنا 71% من الوقت"
+        ↓
+يصدر 3 استراتيجيات موازية للعادي
+```
+
+**إعداداته في الواجهة:**
+```
+زر تفعيل: 🟢 شغّل المطور
+زر إيقاف: 🔴 أوقف المطور
+زر تصفير: 🗑️ امسح بيانات التدريب
+
+عند التصفير:
+
+"هل أنت متأكد؟
+سيُمسح كل تدريب المطور ويبدأ من صفر.
+الصفقات في Supabase لن تتأثر."
+نعم / لا
+```
+
+---
+
+## المسابقة بينهم
+
+```
+كل جلسة اجتماع:
+العادي يصدر 3 استراتيجيات
+المطور يصدر 3 استراتيجيات (لو مفعّل)
+        ↓
+6 موظفين وهميين يشتغلون بالتوازي:
+عادي مستقر وهمي 1 (محافظة)
+عادي مستقر وهمي 2 (متوسطة)
+عادي مستقر وهمي 3 (جريئة)
+مطور مستقر وهمي 1 (محافظة)
+مطور مستقر وهمي 2 (متوسطة)
+مطور مستقر وهمي 3 (جريئة)
+        ↓
+بعد فترة — تشوف النتائج
+السوق يقرر مين أذكى
+
+```
+
+---
+
+## للمبرمج
+
+```python
+class StandardDecisionMaker:
+    model = "claude-sonnet-4-6"
+    roles = ["reactive", "case_based", 
+             "predictive", "utility_based"]
+    output_count = 3  # دايماً 3 استراتيجيات
+    
+    priorities = {
+        "risk": "guardian",      # الحارس
+        "timing": "chartist",    # الشارتيست
+        "news": "broadcaster"    # المذيع
+    }
+
+class AdvancedDecisionMaker:
+    model = "lstm_keras"
+    roles = ["predictive", "learning_agent"]
+    output_count = 3
+    
+    # إعدادات في DB
+
+    is_active: bool = False
+    training_data: list = []
+    
+    def reset_training(self):
+        self.lstm_model = None
+        self.training_data = []
+        # الصفقات في Supabase تبقى سليمة
+
+# المسابقة
+def run_kitchen_session(config):
+    standard_strategies = StandardDecisionMaker.decide()
+    
+    if AdvancedDecisionMaker.is_active:
+        advanced_strategies = AdvancedDecisionMaker.decide()
+        # يشتغلون بالتوازي
+        create_workers(standard_strategies, "standard")
+        create_workers(advanced_strategies, "advanced")
+    else:
+        create_workers(standard_strategies, "standard")
+```
+
+---
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الخامس 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 نظام الطبقتين 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+نظام الطبقتين
+
+---
+
+## الفكرة الأساسية
+
+قبل كل صفقة — فيه سؤالان:
+
+```
+الطبقة 1: "هل الجو العام مناسب؟" (مجاني)
+الطبقة 2: "هل هذه الفرصة تستاهل؟" (AI مدفوع)
+
+```
+
+**لو فشل في الطبقة 1 → ما يصل للطبقة 2 أبداً**
+**= توفير 66% من تكلفة API** ✅
+
+---
+
+## الطبقة 1 — المجانية
+
+### 3 مصادر:
+
+**Fear & Greed Index:**
+```
+0-25   = خوف شديد → ممكن فرصة شراء
+25-50  = خوف → تحذير
+50-75  = طمع → انتبه
+75-100 = طمع شديد → لا تشتري ❌
+```
+
+**مثال:**
+```
+Fear & Greed = 82 (طمع شديد)
+        ↓
+الطبقة 1 ترفض ❌
+الطبقة 2 ما تُوقظ
+
+الصفقة ما تدخل
+```
+
+**CryptoPanic:**
+```
+موقع يجمع أخبار الكريبتو
+Python يفحصه تلقائياً مجاناً
+خبر خطورة عالية = يوقف الكل فوراً
+```
+
+**Bitcoin Dominance:**
+```
+BTC Dominance = نسبة Bitcoin من كل سوق الكريبتو
+لو BTC Dominance يرتفع = Altcoins تضعف
+لو BTC Dominance ينخفض = Altcoins تقوى
+```
+
+### كود الطبقة 1:
+```python
+def layer_1_check(symbol):
+    # Fear & Greed
+    fear_greed = get_fear_greed_index()
+    if fear_greed > 75:
+        return False  # طمع شديد — لا تدخل
+    
+
+    # CryptoPanic
+    news_risk = get_cryptopanic_risk(symbol)
+    if news_risk == "high":
+        return False  # خبر خطير — لا تدخل
+    
+    # Bitcoin Dominance
+    btc_dom = get_btc_dominance()
+    if btc_dom_rising() and symbol != "BTC":
+        return False  # BTC يقوى — Altcoins تضعف
+    
+    return True  # اجتاز الطبقة 1 ✅
+```
+
+---
+
+## الطبقة 2 — AI المدفوعة
+
+### متى تُوقظ؟
+```
+فقط لما الطبقة 1 قالت ✅
+وفقط عند قرار دخول صفقة فعلي
+```
+
+### ماذا تفعل؟
+```
+
+تسأل AI:
+"في ضوء البيانات الحالية —
+هل هذه الفرصة تستاهل الدخول؟"
+        ↓
+AI يحلل ويرد: نعم / لا
+```
+
+### التكلفة:
+```
+كل استدعاء = ~0.02$
+لو 100 فرصة يومياً:
+بدون الطبقة 1 = 100 × 0.02$ = 2$/يوم = 60$/شهر
+مع الطبقة 1 = 34 فرصة فقط تعدي = 0.68$/يوم = ~20$/شهر
+توفير 66% ✅
+```
+
+### كود الطبقة 2:
+```python
+def layer_2_check(symbol, opportunity):
+    # يُوقظ فقط بعد اجتياز الطبقة 1
+    if not layer_1_check(symbol):
+        return False
+    
+    # يسأل AI
+
+    response = ask_ai(
+        f"هل فرصة {symbol} تستاهل الدخول؟"
+        f"البيانات: {opportunity}"
+    )
+    
+    return response == "yes"
+```
+
+---
+
+## القناص — استثناء خاص
+
+### ليش استثناء؟
+القناص يصطاد حركات سريعة جداً.
+لو انتظر AI يفكر — الفرصة راحت!
+
+### Timeout 15 ثانية:
+```
+القناص يشوف فرصة
+        ↓
+يسأل الطبقة 2 (AI)
+        ↓
+انتظر 15 ثانية فقط:
+
+AI رد خلال 15 ثانية:
+
+    نعم → يدخل ✅
+    لا → ما يدخل ❌
+
+AI ما رد خلال 15 ثانية:
+    يتجاهل الطبقة 2
+    يدخل بالطبقة 1 فقط ✅
+    (الفرصة ما تنتظر!)
+```
+
+### CryptoPanic للقناص:
+```python
+def sniper_check(symbol):
+    # يفلتر CryptoPanic تلقائياً ومجاناً
+    news_risk = get_cryptopanic_risk(symbol)
+    
+    if news_risk == "high":
+        stop_sniper()  # يوقف فوراً ❌
+        return False
+    
+    # Timeout للطبقة 2
+    try:
+        response = ask_ai(symbol, timeout=15)
+        return response == "yes"
+    except TimeoutError:
+        # AI ما رد — يدخل بالطبقة 1 فقط
+        return layer_1_check(symbol)
+
+```
+
+---
+
+## ملخص للمبرمج
+
+```
+اجتماع الخبراء:
+← خارج نطاق الطبقتين تماماً
+← لا يتداول = لا يحتاج فلترة
+
+الموظفون العاديون:
+← الطبقة 1 أولاً (مجاني)
+← لو نجح → الطبقة 2 (AI)
+← لو نجح → يدخل الصفقة
+← بدون timeout
+
+القناص:
+← الطبقة 1 أولاً (مجاني)
+← لو نجح → الطبقة 2 (AI) — 15 ثانية فقط
+← AI ما رد → يدخل بالطبقة 1 فقط
+← CryptoPanic خطر عالي → يوقف فوراً
+```
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الرابع 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 فحص السوق  🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+ فحص السوق
+
+---
+
+## ما هو فحص السوق؟
+
+قبل أي صفقة — الصقر يسأل سؤالاً واحداً:
+**"هل البيئة آمنة للتداول الآن؟"**
+
+---
+
+## معايير التصنيف
+
+
+### ATR (متوسط المدى الحقيقي):
+```
+ATR = كم يتحرك السعر في المتوسط
+
+مثال BTC:
+متوسط ATR الطبيعي = 500$
+ATR الحالي = 800$
+800 > 500 × 1.5 = 750
+        ↓
+السوق متوتر! ⚠️
+```
+
+### Volume (حجم التداول):
+```
+مثال:
+متوسط Volume اليومي = 1,000,000$
+Volume الحالي = 2,200,000$
+2,200,000 > 1,000,000 × 2 = 2,000,000
+        ↓
+السوق متوتر! ⚠️
+```
+
+### القاعدة:
+```python
+
+def classify_market(symbol):
+    atr_current = calculate_atr(symbol)
+    atr_average = calculate_atr_average(symbol, days=20)
+    
+    volume_current = get_current_volume(symbol)
+    volume_average = get_average_volume(symbol, days=20)
+    
+    if atr_current > atr_average * 1.5:
+        return "volatile"  # متوتر
+    
+    if volume_current > volume_average * 2:
+        return "volatile"  # متوتر
+    
+    return "stable"  # مستقر
+```
+
+---
+
+## إحصاء الكريبتو تاريخياً
+
+```
+من أصل 365 يوم في السنة:
+180 يوم = مستقر (49%) ← موظفو المستقر يشتغلون
+
+120 يوم = متوتر (33%) ← موظفو المتوتر يشتغلون
+65 يوم  = عنيف (18%) ← ROADMAP (لاحقاً)
+```
+
+**يعني:**
+```
+موظفو المستقر يشتغلون نصف السنة تقريباً ✅
+موظفو المتوتر يشتغلون ثلث السنة ✅
+الاثنين ما يشتغلون في نفس الوقت
+```
+
+---
+
+## نظام التبديل الأوتوماتيكي
+
+### كيف يشتغل؟
+
+```
+Python يفحص كل 15 دقيقة:
+"هل نوع السوق تغيّر؟"
+        ↓
+لو تغيّر من مستقر → متوتر:
+يوقف موظفي المستقر (ناعم — ينهون صفقاتهم)
+يشغّل موظفي المتوتر
+        ↓
+
+تليجرام ينبهك فوراً
+```
+
+### خياراتك على تليجرام:
+
+```
+تليجرام: "⚠️ السوق تحوّل من مستقر إلى متوتر
+تم التبديل أوتوماتيكياً — ردّ خلال 30 دقيقة"
+
+✅ موافق أو سكت 30 دقيقة:
+يكمل التبديل — موظفو المتوتر يشتغلون
+
+❌ رفض:
+يرجع للوضع القديم
+موظفو المستقر يكملون
+
+⏹️ إيقاف:
+يوقف الكل — مستقر ومتوتر
+لا أحد يشتغل
+```
+
+### مثال عملي:
+```
+الساعة 2:00 PM — السوق مستقر ✅
+موظف مستقر 1 و 2 و 3 يشتغلون
+
+
+الساعة 3:15 PM:
+Python فحص → ATR ارتفع فجأة!
+        ↓
+السوق صار متوتر ⚠️
+        ↓
+موظفو المستقر: "لا تدخلون صفقات جديدة"
+موظفو المتوتر: "ابدأوا"
+        ↓
+تليجرام يجيك: "تم التبديل ⚠️"
+        ↓
+سكت 30 دقيقة = موافقة تلقائية ✅
+```
+
+---
+
+## علاقة فحص السوق بالموظفين
+
+```python
+# كل 15 دقيقة
+def market_monitor():
+    current_type = classify_market("BTC")
+    previous_type = get_stored_market_type()
+    
+    if current_type != previous_type:
+
+        # السوق تغيّر!
+        switch_workers(current_type)
+        send_telegram_alert(current_type)
+        
+        # انتظر رد 30 دقيقة
+        response = wait_for_response(minutes=30)
+        
+        if response == "reject":
+            # المستخدم رفض
+            switch_workers(previous_type)
+        
+        elif response == "stop":
+            # المستخدم أوقف الكل
+            stop_all_workers()
+        
+        # سكت أو موافق = يكمل
+```
+
+---
+
+## ملاحظة مهمة للمبرمج
+
+```
+فحص نوع السوق (كل 15 دقيقة) ≠ مراقبة الفرص (مستمرة)
+
+فحص السوق = "هل البيئة آمنة؟" (كل 15 دقيقة)
+
+مراقبة الفرص = "هل الاستراتيجية اكتملت؟" (كل دقيقة أو أقل)
+
+الاثنين يشتغلان بالتوازي
+```
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الثالث 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 الشارتات 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+
+---
+
+## ليش 3 شارتات؟
+
+كل شارت يجاوب على سؤال مختلف:
+
+```
+4 ساعات → "وين السوق رايح؟"
+15 دقيقة → "وين أدخل بالضبط؟"
+1 دقيقة  → للقناص فقط "الآن أو لا!"
+```
+
+---
+
+## شارت 4 ساعات — الاتجاه العام
+
+**ما هو؟**
+كل شمعة = 4 ساعات من تحركات السوق.
+
+**ليش؟**
+يبين الصورة الكبيرة — السوق صاعد أو هابط أو جانبي.
+
+**مثال:**
+```
+
+شوفت على شارت 4 ساعات:
+السعر فوق المتوسط المتحرك
+RSI = 55 (منطقة طمع معتدل)
+        ↓
+القرار: السوق في اتجاه صاعد ✅
+نبحث عن فرصة شراء
+```
+
+**قاعدة:**
+```python
+# لا تدخل صفقة تعاكس اتجاه 4 ساعات
+if trend_4h == "bearish":
+    # ممنوع الشراء حتى لو 15 دقيقة يقول اشترِ
+    return "skip"
+```
+
+---
+
+## شارت 15 دقيقة — نقطة الدخول
+
+**ما هو؟**
+كل شمعة = 15 دقيقة من تحركات السوق.
+
+**ليش؟**
+بعد ما تأكدت الاتجاه من 4 ساعات — تدخل بدقة.
+
+
+**مثال:**
+
+```
+4 ساعات: اتجاه صاعد ✅
+        ↓
+شارت 15 دقيقة:
+RSI انخفض لـ 35 (منطقة ذعر قصير)
+MACD بدأ يتقاطع للأعلى
+        ↓
+القرار: ادخل الآن! ✅
+Entry: $42,350
+Target: $43,500
+Stop Loss: $42,000
+```
+
+**قاعدة:**
+```python
+# الدخول يكون فقط لما يتوافق الاثنان
+if trend_4h == "bullish" and rsi_15m < 40 and macd_cross == "up":
+    return "enter"
+```
+
+---
+
+
+## شارت 1 دقيقة — القناص فقط
+
+**ما هو؟**
+كل شمعة = دقيقة واحدة.
+
+**ليش للقناص فقط؟**
+القناص يصطاد حركات سريعة جداً.
+باقي الموظفين ما يحتاجون هذه الدقة — يكفيهم 15 دقيقة.
+
+**مثال:**
+```
+Python يراقب 30 زوج كل دقيقة
+        ↓
+BTC تحرك 0.3% في دقيقة واحدة! 🚨
+        ↓
+القناص يشيك على 15 دقيقة للتأكيد
+        ↓
+يدخل خلال 15 ثانية أو يتجاهل
+```
+
+**قاعدة:**
+```python
+# القناص فقط يستخدم شارت الدقيقة
+if worker_type == "sniper":
+
+    check_1min_chart()
+else:
+    # باقي الموظفين يتجاهلون شارت الدقيقة
+    pass
+```
+
+---
+
+## ملخص للمبرمج
+
+```python
+TIMEFRAMES = {
+    "trend": "4h",      # لكل الموظفين — الاتجاه العام
+    "entry": "15m",     # لكل الموظفين — نقطة الدخول
+    "scalp": "1m",      # للقناص فقط — الصيد السريع
+}
+
+def should_enter(worker_type, symbol):
+    # الخطوة 1: تحقق من الاتجاه العام
+    trend = analyze_4h(symbol)
+    if trend == "unclear":
+        return False
+    
+    # الخطوة 2: ابحث عن نقطة الدخول
+    entry_signal = analyze_15m(symbol)
+    
+
+    # الخطوة 3: للقناص فقط
+    if worker_type == "sniper":
+        return analyze_1m(symbol)
+    
+    return trend == "bullish" and entry_signal == "buy"
+```
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 مقدمه الاولى 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 أنواع العقول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴
+---
+
+## جدول العقول
+
+## أنواع العقول في المنصة
+
+التحليلي — Reactive Agent
+يشوف البيانات الحالية ويرد فوراً.
+
+العرّافي — Case-Based Reasoning
+يقارن الوضع الحالي بـ 10 سنوات من التاريخ.
+
+التنبؤي — Predictive Model
+يعطي احتمالية مستقبلية بدقة رقمية.
+
+الحسابي — Utility-Based Agent
+يحسب ربح/مخاطرة رياضياً ويختار الأفضل.
+
+LSTM — LSTM via Keras
+يتعلم من صفقاتنا الحقيقية تحديداً.
+
+
+متعدد العقول — Multi-Agent System
+مجموعة عقول تتناقش وتتفق على قرار.
+
+عقل التعلم — Learning Agent
+يتحسن مع كل صفقة جديدة.
+---
+
+## توزيع العقول على الخبراء
+
+```
+كل الخبراء الثمانية:
+✅ تحليلي (Reactive)
+✅ عرّافي (Case-Based)
+
+العادي (الأمير) إضافة:
+✅ تنبؤي (Predictive) — جزئي
+✅ حسابي (Utility-Based) — يرتب الـ 3 استراتيجيات
+
+المطور (LSTM) إضافة:
+✅ تنبؤي (Predictive) — كامل
+✅ عقل التعلم (Learning Agent) — يتحسن مع الوقت
+
+المطبخ كاملاً:
+✅ متعدد العقول (Multi-Agent System)
+
+```
+
+---
+
+## المطور — إعدادات خاصة
+
+```
+زر تفعيل: 🟢 شغّل المطور
+زر إيقاف: 🔴 أوقف المطور
+```
+
+**زر تصفير التدريب:**
+```
+ تصفير بيانات تدريب المطور
+
+عند الضغط يظهر:
+"هل أنت متأكد؟
+سيُمسح كل تدريب المطور ويبدأ من صفر.
+الصفقات المسجلة في Supabase لن تتأثر.
+لا يمكن التراجع."
+
+نعم → يمسح ذاكرة LSTM فقط ✅
+لا → يلغي العملية
+```
+
+**ملاحظة مهمة:**
+```
+المطور والعادي يشتغلان بالتوازي دايماً
+المطور لا يلغي العادي أبداً
+السوق يقرر مين أفضل
+```
+
+---
+
+## للمبرمج
+
+```python
+class ExpertTypes:
+    # كل الخبراء
+    REACTIVE = "reactive"           # تحليلي
+    CASE_BASED = "case_based"       # عرّافي
+    
+    # العادي فقط
+    PREDICTIVE_PARTIAL = "predictive_partial"  # تنبؤي جزئي
+    UTILITY = "utility_based"       # حسابي
+    
+    # المطور فقط
+    PREDICTIVE_FULL = "predictive_full"  # تنبؤي كامل
+
+    LEARNING = "learning_agent"     # عقل التعلم
+    
+    # المطبخ كاملاً
+    MULTI_AGENT = "multi_agent"     # متعدد العقول
+
+class AdvancedModel:
+    def reset_training(self):
+        # يمسح ذاكرة LSTM فقط
+        # الصفقات في Supabase تبقى سليمة
+        self.lstm_model = None
+        self.training_data = []
+        self.save_reset_log()  # يسجل وقت التصفير
+```
+
+---
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 مقدمه الثانيه 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 تغييرات بالمسميات 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+نظام التسمية الجديد:
+
+المطبخ تغيير المسمى الى اجتماع الخبراء 
+
+الأمير  تغيير المسمى الى  عادي
+الملك تغيير المسمى الى مطور
+انتحاري تغيير المسمى الى حقيقي
+جندي تغيير المسمى الى وهمي
+طيار تغيير المسمى الى متوتر
+مشاة تغيير المسمى الى مستقر
+
+
+### الترقيم:
+- تسلسلي مستقل لكل فئة
+- الرقم لا يتكرر أبداً حتى لو حُذف الموظف
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 شرح الفكره الاساسيه 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+
+
+# القسم 1 — نظرة عامة
+## شرح لـ Antigravity بالتفصيل
+
+---
+
+## الفكرة الأساسية
+
+
+مشروع الصقر = منظومة تداول ذكية من 3 مراحل متسلسلة.
+القاعدة الذهبية: **لا شيء يلمس فلوساً حقيقية إلا بعد موافقة يدوية من المالك.**
+
+---
+
+## المرحلة 1: اجتماع الخبراء
+
+**ما هو؟**
+8 نماذج AI تتناقش مع بعض لإنتاج استراتيجيات تداول.
+
+**كيف يشتغل؟**
+```
+المالك يضغط زر "عقد الاجتماع" يدوياً
+        ↓
+Python يجمع البيانات (أسعار + أخبار + مشاعر)
+        ↓
+8 خبراء يتناقشون في 4 جولات
+        ↓
+الأمير يصدر 3 استراتيجيات فقط
+```
+
+**مثال:**
+```
+
+الاجتماع قرر:
+استراتيجية محافظة: اشترِ BTC لما RSI < 35
+استراتيجية متوسطة: اشترِ BTC لما RSI < 40
+استراتيجية جريئة: اشترِ BTC لما RSI < 45
+```
+
+**قاعدة مهمة:**
+اجتماع الخبراء **لا يتداول أبداً** — فقط يفكر ويقترح.
+
+---
+
+## المرحلة 2: الموظفون (Paper Trading)
+
+**ما هو؟**
+بوتات Python تختبر الاستراتيجيات بأموال وهمية على Alpaca Paper.
+
+**كيف يشتغل؟**
+```
+الاستراتيجية المحافظة → موظف وهمي 1
+الاستراتيجية المتوسطة → موظف وهمي 2
+الاستراتيجية الجريئة  → موظف وهمي 3
+        ↓
+يشتغلون بأموال وهمية . مده لا نهائيه 
+        ↓
+النتائج تُحفظ في Supabase
+
+```
+
+**مثال:**
+```
+موظف وهمي 1: ربح 3% في شهر ✅
+موظف وهمي 2: ربح 1% في شهر ✅
+موظف وهمي 3: خسر 2% في شهر ❌
+```
+
+**قاعدة مهمة:**
+الموظفون يشتغلون **أوتوماتيكياً** — لا تدخل يدوي.
+
+---
+
+## المرحلة 3: الترقية للحقيقي
+
+**ما هو؟**
+المالك يختار الموظف الناجح ويرقيه للتداول بفلوس حقيقية.
+
+**كيف يشتغل؟**
+```
+المالك يشوف النتائج
+        ↓
+يختار موظف وهمي 1 (الأفضل)
+        ↓
+
+يضغط زر "ترقية للحقيقي" يدوياً
+        ↓
+يصير "انتحاري مشاة الأمير 1"
+يتداول بفلوس حقيقية على Binance/Alpaca
+```
+
+**قاعدة مهمة:**
+الترقية **يدوية دائماً** — النظام لا يرقي أحد بدون إذن المالك. وسواء تم ترقيته او لا . لا يتوقف عن التداول ابدا حتى يتم ايقافه من المستخدم
+
+---
+
+## ملخص للمبرمج
+
+```python
+# المرحلة 1: اجتماع الخبراء
+# - trigger: يدوي فقط (زر في الواجهة)
+# - output: 3 استراتيجيات JSON
+# - لا يتداول أبداً
+
+# المرحلة 2: الموظفون
+# - trigger: أوتوماتيكي بعد الاجتماع
+# - يشتغل على Alpaca Paper (وهمي)
+# - يحفظ النتائج في Supabase
+
+
+# المرحلة 3: الترقية
+# - trigger: يدوي فقط (زر في الواجهة)
+# - يشتغل على Alpaca Live أو Binance (حقيقي)
+# - لا يحدث أبداً بدون موافقة المالك
+
+
+
+
+
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 القسم الاول 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴 🔴🔴🔴🔴🔴🔴
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+
+
+
+
+
+## ترتيب النافذة (إعدادات الموظف أولاً ثم يتم الاجتماع)
+
+```
+1. انا احدد كل الإعدادات
+2. تضغط زر "عقد الاجتماع"
+3. النظام يشتغل وحده
+4. بعد ساعات — تلقى الموظفين جاهزين أوتوماتيكياً
+```
+
+---
+
+## سيناريو الإعدادات الكاملة (عند الضغط على زر اجتماع 
+
+وقبل الاجتماع)
+
+بعد الضغط على زر اجتماع الخبراء
+
+اختيار نوع النموذج متخذ القرار
+
+☐ العادي (standard)
+   النموذج: Claude Sonnet 4.6
+   النوع: تحليلي + عرّافي + تنبؤي + Utility-Based
+
+☐ المطور (advanced)
+   النموذج: LSTM via Keras
+   النوع: تنبؤي + Learning Agent
+   ⚠️ يظهر فقط لما يكون مفعّلاً وعنده بيانات كافية
+
+☐ الاثنين معاً (both)
+   يتنافسون على Paper Trading
+   السوق يقرر الأفضل
+```
+
+**نوع السوق:**
+```
+☐ مستقر (stable) → يبني موظفين مستقر وهمي
+☐ متوتر (volatile) → يبني موظفين متوتر وهمي
+```
+
+
+**رأس المال الابتدائي:**
+```
+☐ 100$
+☐ 1,000$
+☐ مخصص .....$
+```
+
+**زاوية التفكير:**
+```
+☐ جديدة كلياً (new)
+☐ تحسين الموجودة (improve) → تفتح قائمة موظفيك الحاليين
+```
+
+**نصيب الموظف من المحفظة:**
+```
+☐ مبلغ ثابت .....$
+   مثال: 500$ ثابت دايماً
+   المحفظة كبرت أو صغرت — الموظف يتداول 500$ دايماً
+
+☐ نسبة .....% بدون Compounding
+   مثال: 25% من 2000$ = 500$
+   لو المحفظة صارت 2400$ → لا يزال يتداول 500$
+
+☐ نسبة .....% مع Compounding
+   مثال: 25% من 2000$ = 500$
+   لو المحفظة صارت 2400$ → يتداول 600$
+```
+
+**حجم كل صفقة (= المخاطرة):**
+```
+☐ مبلغ ثابت .....$
+   مثال: حصته 500$ — كل صفقة بـ 100$ ثابت دايماً
+
+☐ نسبة من حصته .....%
+   مثال: 20% من 500$ = 100$ لكل صفقة
+   لو حصته كبرت لـ 600$ → كل صفقة 120$
+```
+
+**عدد الصفقات المفتوحة:**
+```
+☐ مفتوح بلا حد
+   مثال: في 10 فرص → يدخل الـ 10 كلها بنفس الوقت
+
+☐ حد أقصى ..... صفقة
+   مثال: حد 3 صفقات
+   في 5 فرص → يدخل 3 فقط وينتظر
+   لما تقفل واحدة → يدخل الرابعة
+```
+
+
+**إعدادات السيولة:**
+```
+☐ صارم — التزم بالحجم المحدد فقط
+   لو السيولة منخفضة → ينتظر ولا يدخل
+
+☐ مرن — ادخل بالمتاح لو السيولة أقل
+   مثال: طلب 1000$ والسيولة تسمح بـ 800$ → يدخل بـ 800$
+   + ☐ استخدم الباقي في صفقات إضافية لو وجدت فرص
+      الـ 200$ الباقية تدخل صفقة إضافية لو جاءت فرصة
+```
+
+**Take Profit:**
+```
+☐ كما في التوصية
+   مثال: التوصيه الاساسيه قالت "اخرج لما الربح يوصل 3%"
+   الموظف يلتزم بـ 3%
+
+☐ نسبة مخصصة .....%
+   مثال: بغض النظر عن التوصيه الاساسيه
+   الموظف يخرج لما يربح 5%
+```
+
+**Stop Loss:**
+```
+
+☐ كما في التوصية + Trailing (الافتراضي)
+   مثال: التوصيه الاساسيه قالت "اخرج لما الخسارة تصل 1%"
+   + Trailing: لو السعر ارتفع → وقف الخسارة يرتفع معه تلقائياً
+
+☐ نسبة مخصصة .....% + Trailing
+   نفس الفكرة لكن بنسبتك أنت
+
+☐ ثابت بنسبة .....% (بدون Trailing)
+   وقف الخسارة ثابت عند نقطة معينة
+   ما يتحرك حتى لو السعر ارتفع
+```
+
+**انتهاء الصلاحية:**
+```
+☐ كما في التوصية
+   مثال: التوصيه الاساسيه قالت "الصفقة تنتهي بعد 48 ساعة"
+   الموظف يلتزم . التوصيه قالت حتى الربح او الخساره ينتظر الموظف الربح والخساره
+
+☐ اخرج بعد ..... دقيقة
+   مثال: بعد 30 دقيقة بغض النظر عن الربح أو الخسارة
+   الموظف يخرج بسعر السوق
+
+☐ اخرج نهاية اليوم
+
+   كل يوم الساعة 11:59 PM
+   الموظف يغلق كل صفقاته المفتوحة
+```
+
+**ربط الصديق:**
+```
+[قائمة الموظفين المتاحين]
+كل مستقر يرتبط بمتوتر — الرابط ثابت ولا يتغير
+```
+
+---
+
+## زر: عقد الاجتماع ✅
+
+---
+
+## الاستنساخ — الحالات الأربعة
+
+```
+وهمي → وهمي:
+نفس الاستراتيجية + إعدادات جديدة ✅
+(لو تبي تجرب إعدادات مختلفة)
+
+وهمي → حقيقي:
+نفس الاستراتيجية + تفتح الإعدادات كاملة للتعديل ✅
+
+(الترقية للتداول الحقيقي)
+
+حقيقي → وهمي:
+نفس الاستراتيجية + إعدادات جديدة ✅
+(تجربة إعدادات جديدة بأمان)
+
+حقيقي → حقيقي:
+نفس الاستراتيجية + إعدادات جديدة ✅
+(نسخة موازية بإعدادات مختلفة)
+```
+
+**في كل حالة:**
+
+```
+النوع والاستراتيجية = محددان تلقائياً من الأصل ✅
+الإعدادات = حرية كاملة للتعديل ✅
+الاسم = [اسم الأصل - نسخة X] (قابل للتعديل)
+```
+

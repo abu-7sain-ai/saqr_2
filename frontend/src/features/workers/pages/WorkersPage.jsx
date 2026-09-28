@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react'
-import { Plus, Search, Filter, RefreshCcw, Trash2 } from 'lucide-react'
+import { Plus, Search, Filter, RefreshCcw, Trash2, Zap } from 'lucide-react'
 import { useWorkerStore } from '../store/useWorkerStore'
 import WorkerCard from '../components/WorkerCard'
 import WorkerFilters from '../components/WorkerFilters'
 import LiquidationModal from '../components/LiquidationModal'
 import CloningModal from '../components/CloningModal'
+import CreateWorkerModal from '../components/CreateWorkerModal'
 import { workerService } from '../services/workerService'
 
 const WorkersPage = () => {
@@ -19,6 +20,9 @@ const WorkersPage = () => {
     updateStatus,
     deleteAllStoppedWorkers
   } = useWorkerStore()
+
+  const [isCreateModalOpen, setIsCreateModalOpen] = React.useState(false)
+  const [successToast, setSuccessToast] = React.useState(null)
 
   useEffect(() => {
     fetchWorkers()
@@ -90,6 +94,14 @@ const WorkersPage = () => {
           </p>
         </div>
         <div className="d-flex gap-3">
+          <button
+            type="button"
+            id="btn-create-worker"
+            onClick={() => setIsCreateModalOpen(true)}
+            className="btn btn-gold px-4 py-3 rounded-4 d-flex align-items-center gap-2 text-black fw-black shadow-gold"
+          >
+            <Plus size={20} /> إنشاء موظف جديد
+          </button>
           <button
             onClick={fetchWorkers}
             className="btn btn-outline-accent px-4 py-3 rounded-4 d-flex align-items-center gap-3"
@@ -170,6 +182,16 @@ const WorkersPage = () => {
         onConfirm={handleCloneConfirm}
       />
 
+      <CreateWorkerModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onCreated={(newWorker) => {
+          fetchWorkers()
+          setSuccessToast(`تم إنشاء وتشغيل الموظف "${newWorker?.name || 'الجديد'}" بنجاح! 🚀`)
+          setTimeout(() => setSuccessToast(null), 4000)
+        }}
+      />
+
       <style>{`
         .spin { animation: rotate 1s linear infinite; }
         @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -191,6 +213,42 @@ const WorkersPage = () => {
               </div>
               <div className="modal-body">
                 <div className="row g-3">
+                  {selectedWorker.type === 'paper' && (
+                    <div className="col-12">
+                      <div
+                        className="p-3 rounded-3 d-flex align-items-center justify-content-between flex-wrap gap-2"
+                        style={{
+                          background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.15) 0%, rgba(245, 158, 11, 0.08) 100%)',
+                          border: '1px solid rgba(234, 179, 8, 0.4)',
+                        }}
+                      >
+                        <div>
+                          <div className="fw-bold text-warning d-flex align-items-center gap-2">
+                            <Zap size={18} /> ترقية الموظف إلى حساب حقيقي (Live)
+                          </div>
+                          <div className="extra-small text-secondary mt-1">
+                            هذا الموظف يعمل حالياً في الوضع التجريبي (Paper). يمكنك تحويله فوراً ليتداول بأموال حقيقية على المنصة.
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-warning btn-sm fw-bold px-3 py-2 rounded-3 text-dark d-flex align-items-center gap-2"
+                          onClick={async () => {
+                            if (window.confirm(`هل أنت متأكد من تحويل الموظف "${selectedWorker.name}" إلى حساب حقيقي مباشر؟ سيبدأ بتنفيذ الصفقات بأموال حقيقية!`)) {
+                              const success = await useWorkerStore.getState().promoteWorker(selectedWorker.id);
+                              if (success) {
+                                setSelectedWorker(prev => ({ ...prev, type: 'live' }));
+                                setSuccessToast(`تمت ترقية الموظف "${selectedWorker.name}" إلى حساب حقيقي بنجاح! ⚡`);
+                                setTimeout(() => setSuccessToast(null), 4000);
+                              }
+                            }
+                          }}
+                        >
+                          <Zap size={16} /> ترقية الآن لحساب حقيقي
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="col-6">
                     <div className="glass-card p-3">
                       <div className="small text-secondary mb-1">الحالة</div>
@@ -233,8 +291,18 @@ const WorkersPage = () => {
                   </div>
                   <div className="col-12">
                     <div className="glass-card p-3">
+                      <div className="small text-secondary mb-1">العملات المخصصة للتداول</div>
+                      <div className="fw-bold text-gold">
+                        {Array.isArray(selectedWorker.user_settings?.symbols) && selectedWorker.user_settings.symbols.length > 0
+                          ? selectedWorker.user_settings.symbols.join(', ')
+                          : selectedWorker.pair || selectedWorker.user_settings?.symbol || 'BTC/USDT'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-12">
+                    <div className="glass-card p-3">
                       <div className="small text-secondary mb-1">الاستراتيجية</div>
-                      <div className="small">{selectedWorker.user_settings?.expert_signal?.entry_description || 'لا يوجد وصف'}</div>
+                      <div className="small">{selectedWorker.user_settings?.expert_signal?.entry_description || selectedWorker.strategy_name || 'لا يوجد وصف'}</div>
                     </div>
                   </div>
                   <div className="col-6">
@@ -472,6 +540,24 @@ const WorkersPage = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {successToast && (
+        <div
+          className="position-fixed bottom-0 start-50 translate-middle-x mb-4 px-4 py-3 rounded-4 d-flex align-items-center gap-3 animate-fade-in"
+          style={{
+            background: 'rgba(16, 185, 129, 0.95)',
+            backdropFilter: 'blur(10px)',
+            color: '#000',
+            fontWeight: '900',
+            zIndex: 999999,
+            boxShadow: '0 10px 30px rgba(16, 185, 129, 0.4)',
+            border: '1px solid rgba(255, 255, 255, 0.3)'
+          }}
+        >
+          <span className="fs-5">🚀</span>
+          <span>{successToast}</span>
         </div>
       )}
     </div>

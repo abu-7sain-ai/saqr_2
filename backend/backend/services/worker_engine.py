@@ -14,6 +14,25 @@ class WorkerEngine:
     # ✅ FIX 3: Worker Pool — نعيد استخدام نفس الـ executor بدل إنشاء object جديد كل مرة
     _executor_pool: Dict[str, WorkerExecutor] = {}
 
+    @classmethod
+    async def get_or_create_executor(cls, worker_id: str):
+        """جلب أو تجهيز الـ executor لموظف معين (مفيد لمعالجة Webhook فورية)"""
+        worker_id_str = str(worker_id)
+        if worker_id_str in cls._executor_pool:
+            return cls._executor_pool[worker_id_str]
+        try:
+            supabase = get_supabase_admin_client()
+            response = supabase.table('workers').select('*').eq('id', worker_id).execute()
+            if response.data:
+                worker_data = response.data[0]
+                executor = WorkerExecutor(worker_data)
+                await executor._initialize_market()
+                cls._executor_pool[worker_id_str] = executor
+                return executor
+        except Exception as e:
+            logger.error(f"Failed to get_or_create_executor for {worker_id}: {e}")
+        return None
+
     @staticmethod
     async def run_all_workers():
         """
