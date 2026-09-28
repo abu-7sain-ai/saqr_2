@@ -175,7 +175,7 @@ class SupabaseTable:
             headers["Prefer"] = "count=exact"
 
         try:
-            fast_timeout = httpx.Timeout(4.0, connect=1.0)
+            fast_timeout = httpx.Timeout(12.0, connect=6.0)
             with httpx.Client(timeout=fast_timeout) as client:
                 if self._method == "GET":
                     r = client.get(url, headers=headers, params=self._params)
@@ -245,7 +245,7 @@ class SupabaseRPC:
         url = _rpc_url(self.fn)
         headers = _headers(self.service)
         try:
-            fast_timeout = httpx.Timeout(4.0, connect=1.0)
+            fast_timeout = httpx.Timeout(12.0, connect=6.0)
             with httpx.Client(timeout=fast_timeout) as client:
                 r = client.post(url, headers=headers, json=self.params)
             if r.status_code >= 400:

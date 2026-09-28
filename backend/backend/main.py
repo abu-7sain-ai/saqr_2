@@ -933,8 +933,12 @@ async def scheduled_market_check():
         logger.error(f"Market check error: {e}")
 
 async def scheduled_worker_run():
-    try: await WorkerEngine.run_all_workers()
-    except Exception as e: logger.error(f"Worker engine error: {e}")
+    try:
+        await WorkerEngine.run_all_workers()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error(f"Worker engine error: {e}")
 
 active_background_tasks = {}
 
@@ -1035,6 +1039,8 @@ async def scheduled_kitchen_check():
             })
             await Notifier.send_telegram(f"🚨 [KITCHEN] تم إيقاف الجلسة {sid[:8]} لتجاوزها 45 دقيقة.")
 
+    except asyncio.CancelledError:
+        pass
     except Exception as e:
         logger.error(f"Kitchen watcher error: {e}")
 

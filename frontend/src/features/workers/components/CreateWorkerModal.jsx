@@ -459,10 +459,8 @@ const CreateWorkerModal = ({ isOpen, onClose, onCreated }) => {
             <button
               type="button"
               onClick={() => setActiveTab('chart')}
-              className={`btn flex-grow-1 p-3 rounded-3 d-flex align-items-center justify-content-center gap-2 border transition-all ${
-                activeTab === 'chart'
-                  ? 'btn-gold text-black fw-black shadow-gold'
-                  : 'btn-outline-secondary text-secondary'
+              className={`btn flex-grow-1 p-3 rounded-3 d-flex align-items-center justify-content-center gap-2 cr-strategy-tab ${
+                activeTab === 'chart' ? 'active-tab' : ''
               }`}
             >
               <LineChart size={18} />
@@ -472,10 +470,8 @@ const CreateWorkerModal = ({ isOpen, onClose, onCreated }) => {
             <button
               type="button"
               onClick={() => setActiveTab('nocode')}
-              className={`btn flex-grow-1 p-3 rounded-3 d-flex align-items-center justify-content-center gap-2 border transition-all ${
-                activeTab === 'nocode'
-                  ? 'btn-gold text-black fw-black shadow-gold'
-                  : 'btn-outline-secondary text-secondary'
+              className={`btn flex-grow-1 p-3 rounded-3 d-flex align-items-center justify-content-center gap-2 cr-strategy-tab ${
+                activeTab === 'nocode' ? 'active-tab' : ''
               }`}
             >
               <Sliders size={18} />
@@ -485,10 +481,8 @@ const CreateWorkerModal = ({ isOpen, onClose, onCreated }) => {
             <button
               type="button"
               onClick={() => setActiveTab('ai_prompt')}
-              className={`btn flex-grow-1 p-3 rounded-3 d-flex align-items-center justify-content-center gap-2 border transition-all ${
-                activeTab === 'ai_prompt'
-                  ? 'btn-gold text-black fw-black shadow-gold'
-                  : 'btn-outline-secondary text-secondary'
+              className={`btn flex-grow-1 p-3 rounded-3 d-flex align-items-center justify-content-center gap-2 cr-strategy-tab ${
+                activeTab === 'ai_prompt' ? 'active-tab' : ''
               }`}
             >
               <Sparkles size={18} />
@@ -542,7 +536,7 @@ const CreateWorkerModal = ({ isOpen, onClose, onCreated }) => {
                         type="button"
                         onClick={() => setPair(c)}
                         className={`btn btn-sm rounded-pill extra-small px-3 ${
-                          pair === c ? 'btn-gold text-black fw-bold shadow-sm' : 'btn-outline-secondary text-silver'
+                          pair === c ? 'btn-gold text-black fw-bold shadow-sm' : 'cr-prompt-chip'
                         }`}
                       >
                         {c}
@@ -661,7 +655,7 @@ const CreateWorkerModal = ({ isOpen, onClose, onCreated }) => {
                             setPromptText(t.text)
                             setParsedPreview(null)
                           }}
-                          className="btn btn-outline-secondary btn-sm rounded-pill extra-small text-silver border-opacity-25"
+                          className="btn btn-sm rounded-pill extra-small cr-prompt-chip px-3 py-1.5"
                         >
                           ⚡ {t.title}
                         </button>
@@ -1023,6 +1017,40 @@ const CreateWorkerModal = ({ isOpen, onClose, onCreated }) => {
         @keyframes crModalFadeIn {
           from { opacity: 0; transform: scale(0.96) translateY(10px); }
           to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .cr-strategy-tab {
+          background: rgba(255, 255, 255, 0.05) !important;
+          color: #ffffff !important;
+          border: 1px solid rgba(255, 255, 255, 0.15) !important;
+          font-weight: 700 !important;
+          transition: all 0.25s ease !important;
+        }
+        .cr-strategy-tab:hover {
+          background: rgba(212, 175, 55, 0.18) !important;
+          color: #ffd700 !important;
+          border-color: rgba(212, 175, 55, 0.6) !important;
+          box-shadow: 0 4px 15px rgba(212, 175, 55, 0.25) !important;
+          transform: translateY(-2px);
+        }
+        .cr-strategy-tab.active-tab {
+          background: linear-gradient(135deg, #ffd700 0%, #d4af37 100%) !important;
+          color: #000000 !important;
+          font-weight: 900 !important;
+          border-color: #ffd700 !important;
+          box-shadow: 0 0 20px rgba(212, 175, 55, 0.45) !important;
+        }
+        .cr-prompt-chip {
+          background: rgba(255, 255, 255, 0.06) !important;
+          color: #ffffff !important;
+          border: 1px solid rgba(255, 255, 255, 0.18) !important;
+          font-weight: 600 !important;
+          transition: all 0.2s ease !important;
+        }
+        .cr-prompt-chip:hover {
+          background: rgba(212, 175, 55, 0.22) !important;
+          color: #ffd700 !important;
+          border-color: #ffd700 !important;
+          box-shadow: 0 0 10px rgba(212, 175, 55, 0.25) !important;
         }
         .shadow-gold {
           box-shadow: 0 0 20px rgba(212, 175, 55, 0.35) !important;

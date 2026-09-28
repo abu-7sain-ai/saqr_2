@@ -84,7 +84,35 @@ class BinanceMarket(BaseMarket):
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             return df
         except Exception as e:
-            logger.error(f"Binance get_historical error: {e}")
+            # Fallback to direct requests with alternative endpoints (e.g. data-api.binance.vision or api1.binance.com)
+            clean_sym = symbol.replace('/', '')
+            alt_endpoints = [
+                f"https://data-api.binance.vision/api/v3/klines?symbol={clean_sym}&interval={interval}&limit={limit}",
+                f"https://api1.binance.com/api/v3/klines?symbol={clean_sym}&interval={interval}&limit={limit}",
+                f"https://api3.binance.com/api/v3/klines?symbol={clean_sym}&interval={interval}&limit={limit}",
+            ]
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=6.0) as client:
+                    for endpoint in alt_endpoints:
+                        try:
+                            resp = await client.get(endpoint)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                df = pd.DataFrame(data, columns=[
+                                    "timestamp", "open", "high", "low", "close", "volume",
+                                    "close_time", "quote_asset_volume", "trades", 
+                                    "taker_buy_base", "taker_buy_quote", "ignore"
+                                ])
+                                for col in ["open", "high", "low", "close", "volume"]:
+                                    df[col] = df[col].astype(float)
+                                df["timestamp"] = pd.to_datetime(df["timestamp"], unit='ms')
+                                return df
+                        except Exception:
+                            continue
+            except Exception as fe:
+                pass
+            logger.warning(f"Binance get_historical error for {symbol}: {e}")
             return pd.DataFrame()
 
     async def place_stop_loss(self, symbol: str, price: float, amount: float) -> dict:
