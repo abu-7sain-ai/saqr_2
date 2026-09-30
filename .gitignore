@@ -63,3 +63,7 @@ supabase/.temp/
 *.tmp
 *.temp
 node_modules
+scratch/
+*_dump.json
+test_breadth_results.json
+update_vps.py

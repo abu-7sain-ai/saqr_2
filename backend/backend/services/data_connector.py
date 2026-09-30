@@ -1,5 +1,6 @@
 import ccxt
 import asyncio
+import logging
 import pandas as pd
 import requests
 import httpx
@@ -8,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
 from ta.volatility import BollingerBands
+
+logger = logging.getLogger(__name__)
 
 class DataConnector:
     """
@@ -55,7 +58,7 @@ class DataConnector:
             
             return df
         except Exception as e:
-            print(f"Error fetching OHLC from {platform}: {e}")
+            logger.error(f"Error fetching OHLC from {platform}: {e}")
             return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'rsi_14', 'ema_20', 'ema_50', 'ema_200'])
 
     @staticmethod
@@ -68,7 +71,7 @@ class DataConnector:
                     data = resp.json()
                     return round(data['data']['market_cap_percentage'].get('btc', 52.0), 2)
         except Exception as e:
-            print(f"Error fetching BTC Dominance: {e}")
+            logger.error(f"Error fetching BTC Dominance: {e}")
         return 52.0
 
     @staticmethod
@@ -91,7 +94,7 @@ class DataConnector:
                         sentiment = 'إيجابي' if votes.get('positive', 0) > votes.get('negative', 0) else 'سلبي' if votes.get('negative', 0) > votes.get('positive', 0) else 'محايد'
                         headlines.append(f"[{sentiment}] {title}")
         except Exception as e:
-            print(f"CryptoPanic API error: {e}")
+            logger.warning(f"CryptoPanic API error: {e}")
         
         # المحاولة 2: CoinGecko Trending كـ fallback
         if not headlines:
@@ -103,7 +106,7 @@ class DataConnector:
                         trending_names = [c['item']['name'] for c in coins]
                         headlines.append(f"العملات الأكثر رواجاً حالياً: {', '.join(trending_names)}")
             except Exception as e:
-                print(f"CoinGecko trending error: {e}")
+                logger.warning(f"CoinGecko trending error: {e}")
         
         if headlines:
             return " | ".join(headlines)
@@ -122,7 +125,7 @@ class DataConnector:
                 sentiment["fear_greed"] = int(data['data'][0]['value'])
                 sentiment["fear_greed_label"] = data['data'][0]['value_classification']
         except Exception as e:
-            print(f"Error fetching sentiment: {e}")
+            logger.error(f"Error fetching sentiment: {e}")
         return sentiment
 
     @staticmethod
@@ -180,7 +183,7 @@ class DataConnector:
             db = Database()
             whitelist = db.get_whitelist()  # Returns ['BTC/USDT', 'ETH/USDT', ...]
             if not whitelist:
-                print("[DataConnector] ⚠️ Whitelist is empty — no symbols to fetch breadth for")
+                logger.warning("[DataConnector] Whitelist is empty - no symbols to fetch breadth for")
                 return []
 
             # ✅ فلترة بناءً على المجموعات المختارة
@@ -188,9 +191,9 @@ class DataConnector:
                 whitelist = [s for s in whitelist if s in filter_symbols]
                 if not whitelist:
                     whitelist = filter_symbols  # fallback
-                print(f"[DataConnector] 🎯 Filtered to {len(whitelist)} group symbols")
+                logger.info(f"[DataConnector] Filtered to {len(whitelist)} group symbols")
 
-            print(f"[DataConnector] 📋 Fetching market breadth for {len(whitelist)} whitelist symbols")
+            logger.info(f"[DataConnector] Fetching market breadth for {len(whitelist)} whitelist symbols")
 
             
             exchange_config = {'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True} if api_key else {}
@@ -202,7 +205,7 @@ class DataConnector:
                 all_tickers = await asyncio.to_thread(exchange.fetch_tickers)
                 tickers = {sym: all_tickers[sym] for sym in formatted_symbols if sym in all_tickers}
             except Exception as e:
-                print(f"[DataConnector] ⚠️ fetch_tickers batch failed: {e}")
+                logger.warning(f"[DataConnector] fetch_tickers batch failed: {e}")
                 tickers = {}
             
             summary = []
@@ -219,45 +222,110 @@ class DataConnector:
                     "high_24h": ticker.get('high', 0),
                     "low_24h": ticker.get('low', 0),
                     "rsi": None,
-                    "ema_trend": None
+                    "ema_trend": None,
+                    "atr": None,
+                    "sharpe": None,
+                    "max_drawdown": None,
+                    "win_rate": None,
                 })
 
-            # جلب RSI و EMA لأعلى 12 عملة نشطة بالتوازي فائق السرعة
-            async def _fetch_indicator_fast(entry):
+            # ✅ FIX: جلب RSI + EMA + ATR + Sharpe + Drawdown لأعلى 12 عملة
+            # نستخدم نفس الـ exchange instance بدل ما نعمل واحدة جديدة لكل عملة
+            shared_exchange = exchange
+
+            async def _fetch_full_indicators(entry):
+                """جلب كل المؤشرات الحقيقية من OHLC لعملة واحدة"""
                 try:
                     s_sym = cls.format_symbol(entry['symbol'])
-                    df = await asyncio.to_thread(cls.get_ohlc, platform, s_sym, '4h', 30, api_key, api_secret)
-                    if df is not None and not df.empty:
-                        if 'rsi_14' in df.columns and not df['rsi_14'].isna().all():
-                            entry["rsi"] = round(float(df['rsi_14'].iloc[-1]), 1)
-                        if 'ema_20' in df.columns and 'ema_50' in df.columns:
-                            entry["ema_trend"] = "صاعد" if df['ema_20'].iloc[-1] > df['ema_50'].iloc[-1] else "هابط"
-                except Exception:
-                    pass
+                    ohlc = await asyncio.to_thread(
+                        shared_exchange.fetch_ohlcv, s_sym, '4h', 60
+                    )
+                    if not ohlc or len(ohlc) < 5:
+                        return
+
+                    df = pd.DataFrame(ohlc, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+                    # --- RSI ---
+                    if len(df) >= 15:
+                        rsi_series = RSIIndicator(close=df['close'], window=14).rsi()
+                        last_rsi = rsi_series.dropna().iloc[-1] if not rsi_series.dropna().empty else None
+                        if last_rsi is not None:
+                            entry["rsi"] = round(float(last_rsi), 1)
+
+                    # --- EMA Trend ---
+                    if len(df) >= 21:
+                        ema20 = df['close'].ewm(span=20, adjust=False).mean().iloc[-1]
+                        ema50 = df['close'].ewm(span=min(50, len(df)), adjust=False).mean().iloc[-1]
+                        entry["ema_trend"] = "صاعد" if ema20 > ema50 else "هابط"
+
+                    # --- ATR (Average True Range) حقيقي ---
+                    if len(df) >= 15:
+                        high = df['high']
+                        low = df['low']
+                        close_prev = df['close'].shift(1)
+                        tr = pd.concat([
+                            (high - low),
+                            (high - close_prev).abs(),
+                            (low - close_prev).abs()
+                        ], axis=1).max(axis=1)
+                        atr_val = tr.rolling(window=14).mean().iloc[-1]
+                        if pd.notna(atr_val):
+                            entry["atr"] = round(float(atr_val), 4)
+
+                    # --- Sharpe Ratio حقيقي (من العوائد اليومية) ---
+                    if len(df) >= 10:
+                        returns = df['close'].pct_change().dropna()
+                        if len(returns) > 1 and returns.std() > 0:
+                            sharpe = (returns.mean() / returns.std()) * (len(returns) ** 0.5)
+                            entry["sharpe"] = round(float(sharpe), 2)
+
+                    # --- Max Drawdown حقيقي ---
+                    if len(df) >= 10:
+                        cummax = df['close'].cummax()
+                        drawdown = (df['close'] - cummax) / cummax
+                        max_dd = drawdown.min()
+                        if pd.notna(max_dd):
+                            entry["max_drawdown"] = round(abs(float(max_dd)) * 100, 2)
+
+                    # --- Win Rate (نسبة الشموع الرابحة) ---
+                    if len(df) >= 10:
+                        winning = (df['close'] > df['open']).sum()
+                        total = len(df)
+                        entry["win_rate"] = round((winning / total) * 100, 1)
+
+                except Exception as ind_err:
+                    logger.debug(f"[DataConnector] Indicator calc failed for {entry.get('symbol')}: {ind_err}")
 
             top_entries = summary[:12]
             if top_entries:
-                try:
-                    await asyncio.wait_for(
-                        asyncio.gather(*[_fetch_indicator_fast(e) for e in top_entries]),
-                        timeout=12.0
-                    )
-                except Exception as gather_err:
-                    print(f"[DataConnector] Parallel indicators fetch timeout/err: {gather_err}")
-            
-            # العملات التي سيتم التركيز عليها في التحليل والتداول هي العملات الأعلى نشاطاً
+                # معالجة على دفعات من 4 عشان نتجنب الـ rate limit
+                batch_size = 4
+                for i in range(0, len(top_entries), batch_size):
+                    batch = top_entries[i:i+batch_size]
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*[_fetch_full_indicators(e) for e in batch]),
+                            timeout=15.0
+                        )
+                    except Exception as batch_err:
+                        logger.warning(f"[DataConnector] Indicator batch {i//batch_size+1} err: {batch_err}")
+                    await asyncio.sleep(0.3)  # تأخير بسيط بين الدفعات
+
+            # إحصائيات للتأكد
+            rsi_count = len([s for s in top_entries if s.get('rsi') is not None])
+            atr_count = len([s for s in top_entries if s.get('atr') is not None])
             selected_summary = top_entries if len(top_entries) >= 3 else summary
-            print(f"[DataConnector] ✅ Market breadth collected: {len(selected_summary)} top active symbols ({len([s for s in selected_summary if s.get('rsi')])} with RSI)")
+            logger.info(f"[DataConnector] Market breadth: {len(selected_summary)} symbols, {rsi_count} with RSI, {atr_count} with ATR")
             return selected_summary
         except Exception as e:
-            print(f"Error collecting market breadth: {e}")
+            logger.error(f"Error collecting market breadth: {e}", exc_info=True)
             return []
 
     @classmethod
     async def collect_all(cls, platform='binance', symbol='BTC/USDT', api_key=None, api_secret=None, filter_symbols=None):
         import time
         t0 = time.time()
-        print(f"[DataConnector] Collecting data for {symbol} on {platform}...")
+        logger.info(f"[DataConnector] Collecting data for {symbol} on {platform}...")
         
         async def _fetch_4h():
             try:
@@ -266,7 +334,7 @@ class DataConnector:
                     timeout=8.0
                 )
             except Exception as e:
-                print(f"[DataConnector] 4h OHLC timeout/error: {e}")
+                logger.warning(f"[DataConnector] 4h OHLC timeout/error: {e}")
                 return pd.DataFrame(columns=['timestamp','open','high','low','close','volume','rsi_14','ema_20','ema_50','ema_200'])
 
         async def _fetch_15m():
@@ -276,7 +344,7 @@ class DataConnector:
                     timeout=8.0
                 )
             except Exception as e:
-                print(f"[DataConnector] 15m OHLC timeout/error: {e}")
+                logger.warning(f"[DataConnector] 15m OHLC timeout/error: {e}")
                 return pd.DataFrame(columns=['timestamp','open','high','low','close','volume'])
 
         async def _fetch_dom():
@@ -298,7 +366,7 @@ class DataConnector:
                     timeout=10.0
                 )
             except Exception as e:
-                print(f"[DataConnector] Market breadth timeout: {e}")
+                logger.warning(f"[DataConnector] Market breadth timeout: {e}")
                 return []
 
         # ⚡ تشغيل جميع مصادر البيانات بالتوازي فائق السرعة
@@ -306,7 +374,7 @@ class DataConnector:
             _fetch_4h(), _fetch_15m(), _fetch_dom(), _fetch_news_item(), _fetch_breadth()
         )
         
-        print(f"[DataConnector] ⚡ All parallel data collected in {time.time()-t0:.2f}s")
+        logger.info(f"[DataConnector] All parallel data collected in {time.time()-t0:.2f}s")
         current_price = df_15m['close'].iloc[-1] if df_15m is not None and not df_15m.empty else 0
         
         # مؤشرات فنية مضمونة الحساب
