@@ -168,76 +168,156 @@ const SessionCard = ({ session, onDelete }) => {
     return String(val)
   }
 
+  const COUNCIL_ROUNDS = [
+    {
+      id: '1_dissection',
+      name: 'الجولة 1: تشريح السوق وسلوك الأسعار اللحظية',
+      experts: [
+        { key: 'chartist', name: 'الشارتيست الكمي (تحليل السلوك السعري والشموع والمؤشرات)' },
+        { key: 'reporter', name: 'المذيع صقر (تحليل المشاعر العامة والأخبار والزخم)' }
+      ]
+    },
+    {
+      id: '2_hypotheses',
+      name: 'الجولة 2: توليد الفرضيات الرقمية والثبات الإحصائي',
+      experts: [
+        { key: 'pulser', name: 'النبّاض (استشعار النبضات وفرضيات الدخول الرقمية)' },
+        { key: 'radar',  name: 'الرادار (مراقبة الثبات الإحصائي وتدفق السيولة)' }
+      ]
+    },
+    {
+      id: '3_adversarial',
+      name: 'الجولة 3: هجوم الفريق الأحمر والمطابقة النقدية',
+      experts: [
+        { key: 'guardian',     name: 'الحارس الصارم (هجوم الأمان واختبار صمود الأزمات التاريخية)' },
+        { key: 'investigator', name: 'المحقق (التدقيق ومطابقة الفرضيات وكشف التناقضات)' }
+      ]
+    },
+    {
+      id: '4_refinement',
+      name: 'الجولة 4: الصياغة الفنية والهندسة الكمية للأهداف والوقف',
+      experts: [
+        { key: 'chartist', name: 'الشارتيست الكمي (تعديل شروط الدخول الفنية)' },
+        { key: 'engineer', name: 'المهندس الكمي (ضبط مستويات الوقف ونسب المخاطرة RRR)' }
+      ]
+    },
+    {
+      id: '5_stress_test',
+      name: 'الجولة 5: محاكاة الانهيار المفاجئ واختبار الضغط الحرج (Flash Crash)',
+      experts: [
+        { key: 'guardian', name: 'الحارس الصارم (فحص متانة الوقف تحت ضغط الانهيارات الكبرى)' },
+        { key: 'pulser',   name: 'النبّاض (استجابة الزخم والسيولة وتفادي الانزلاق السعري)' }
+      ]
+    },
+    {
+      id: '6_audit',
+      name: 'الجولة 6: التدقيق النهائي الشامل لكافة مداولات المجلس',
+      experts: [
+        { key: 'investigator', name: 'المحقق (المراجعة النهائية الشاملة لمداولات الجولات 1-5)' }
+      ]
+    },
+    {
+      id: '7_standard_decree',
+      name: 'الجولة 7: مرسوم الأمير والاعتماد القياسي للاستراتيجيات',
+      experts: [
+        { key: 'prince', name: 'الأمير (صانع القرار القياسي واعتماد الاستراتيجيات)' }
+      ]
+    },
+    {
+      id: '8_advanced_decree',
+      altId: '8_advanced_learning',
+      name: 'الجولة 8: مرسوم الملك والتعلم التكيفي المطور',
+      experts: [
+        { key: 'advanced', name: 'الملك / العقل المطور (استراتيجيات التعلم التكيفي)' }
+      ]
+    }
+  ]
+
   const formatMarkdownToHtml = (rawText) => {
     if (!rawText) return ''
     let text = String(rawText)
 
-    // Convert code blocks
-    text = text.replace(/```([\s\S]*?)```/g, '<pre style="background:#f1f5f9; padding:10px; border-radius:6px; font-size:11px; overflow-x:auto;"><code>$1</code></pre>')
+    // 1. Preserve code blocks
+    const codeBlocks = []
+    text = text.replace(/```([\s\S]*?)```/g, (_, code) => {
+      codeBlocks.push(code)
+      return `<!--CODE_BLOCK_${codeBlocks.length - 1}-->`
+    })
 
-    // Convert Markdown tables
+    // 2. Convert Markdown tables cleanly with placeholders to protect from newline replacement
+    const tableBlocks = []
     const tableRegex = /((?:\|[^\n]+\|\r?\n?)+)/g
     text = text.replace(tableRegex, (match) => {
       const rows = match.trim().split('\n').filter(r => r.trim().startsWith('|'))
       if (rows.length < 2) return match
-      let html = '<div style="overflow-x:auto; margin:12px 0;"><table style="width:100%; border-collapse:collapse; font-size:11px; text-align:right;">'
+      let html = '<div style="overflow-x:auto; margin:14px 0;"><table style="width:100%; border-collapse:collapse; font-size:11px; text-align:right; border:1px solid #cbd5e1;">'
       rows.forEach((row, rIdx) => {
         if (row.includes('---')) return // separator row
         const cells = row.split('|').map(c => c.trim()).filter((c, idx, arr) => idx > 0 && idx < arr.length - 1)
         if (cells.length === 0) return
-        html += '<tr>'
+        html += '<tr style="border-bottom:1px solid #e2e8f0;">'
         cells.forEach(cell => {
           if (rIdx === 0) {
-            html += `<th style="border:1px solid #cbd5e1; padding:6px 10px; background:#f8fafc; font-weight:700; color:#0f172a;">${cell}</th>`
+            html += `<th style="border:1px solid #cbd5e1; padding:8px 10px; background:#f1f5f9; font-weight:700; color:#0f172a; white-space:nowrap;">${cell}</th>`
           } else {
-            html += `<td style="border:1px solid #e2e8f0; padding:6px 10px; color:#334155;">${cell}</td>`
+            html += `<td style="border:1px solid #e2e8f0; padding:6px 10px; color:#334155; line-height:1.5;">${cell}</td>`
           }
         })
         html += '</tr>'
       })
       html += '</table></div>'
-      return html
+      tableBlocks.push(html)
+      return `<!--TABLE_BLOCK_${tableBlocks.length - 1}-->`
     })
 
-    // Convert Headings
+    // 3. Convert Headings
     text = text.replace(/^### (.*$)/gim, '<h5 style="color:#0f172a; font-weight:700; margin:14px 0 6px 0; font-size:13px;">$1</h5>')
     text = text.replace(/^## (.*$)/gim, '<h4 style="color:#b45309; font-weight:800; margin:16px 0 8px 0; font-size:14px;">$1</h4>')
     text = text.replace(/^# (.*$)/gim, '<h3 style="color:#b45309; font-weight:800; margin:18px 0 10px 0; font-size:15px;">$1</h3>')
 
-    // Convert Bold & Italic
+    // 4. Convert Bold & Italic
     text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     text = text.replace(/\*(.*?)\*/g, '<em>$1</em>')
 
-    // Convert Bullet lists
+    // 5. Convert Bullet lists
     text = text.replace(/^[•*-] (.*$)/gim, '<div style="margin-right:12px; margin-bottom:4px;">• $1</div>')
 
-    // Convert Newlines to breaks
+    // 6. Convert Newlines to breaks
     text = text.replace(/\n/g, '<br />')
+
+    // 7. Restore tables
+    tableBlocks.forEach((tb, i) => {
+      text = text.replace(`<!--TABLE_BLOCK_${i}-->`, tb)
+    })
+
+    // 8. Restore code blocks
+    codeBlocks.forEach((cb, i) => {
+      text = text.replace(`<!--CODE_BLOCK_${i}-->`, `<pre style="background:#f1f5f9; padding:10px; border-radius:6px; font-size:11px; overflow-x:auto;"><code>${cb}</code></pre>`)
+    })
 
     return text
   }
 
-  // ✅ تنزيل / طباعة تقرير الجلسة والحوار كـ PDF احترافي
+  // ✅ تنزيل / طباعة تقرير الجلسة والحوار كـ PDF احترافي شامل لجميع الجولات
   const handleExportPDF = (e) => {
     e.stopPropagation()
 
-    const expertRoundsList = [
-      { key: 'chartist',     name: '1. الشارتيست الكمي (تحليل السلوك السعري والشموع والمؤشرات)', round: '1_dissection' },
-      { key: 'reporter',     name: '2. المذيع صقر (تحليل المشاعر العامة والأخبار والزخم)',     round: '1_dissection' },
-      { key: 'pulser',       name: '3. النبّاض (استشعار النبضات وفرضيات الدخول الرقمية)',      round: '2_hypotheses' },
-      { key: 'radar',        name: '4. الرادار (مراقبة الثبات الإحصائي وتدفق السيولة)',       round: '2_hypotheses' },
-      { key: 'guardian',     name: '5. الحارس الصارم (هجوم الأمان واختبار صمود الأزمات)',     round: '3_adversarial' },
-      { key: 'investigator', name: '6. المحقق (التدقيق ومطابقة الفرضيات وكشف التناقضات)',    round: '3_adversarial' },
-      { key: 'engineer',     name: '7. المهندس الكمي (ضبط مستويات الوقف ونسب المخاطرة)',     round: '4_refinement' },
-      { key: 'prince',       name: '8. الأمير (صانع القرار القياسي واعتماد الاستراتيجيات)',   round: '7_standard_decree' },
-      { key: 'advanced',     name: '9. الملك / العقل المطور (استراتيجيات التعلم التكيفي)',   round: '8_advanced_learning' }
-    ]
-
     const allDialogue = []
-    for (const exp of expertRoundsList) {
-      const raw = getExpertDialogue(exp.key, exp.round)
-      if (raw) {
-        allDialogue.push({ name: exp.name, text: stringifyOpinion(raw) })
+    let currentRoundTitle = ''
+    for (const r of COUNCIL_ROUNDS) {
+      const roundContent = rounds[r.id] || (r.altId ? rounds[r.altId] : null) || {}
+      for (const exp of r.experts) {
+        let raw = roundContent[exp.key]
+        if (!raw && exp.key === 'advanced') {
+          raw = rounds['8_advanced_decree']?.advanced || rounds['8_advanced_learning']?.advanced
+        }
+        if (raw) {
+          allDialogue.push({
+            roundTitle: r.name,
+            name: `${exp.name}`,
+            text: stringifyOpinion(raw)
+          })
+        }
       }
     }
 
@@ -249,10 +329,10 @@ const SessionCard = ({ session, onDelete }) => {
         for (const [k, v] of Object.entries(searchIn)) {
           if (typeof v === 'object' && v !== null) {
             for (const [subK, subV] of Object.entries(v)) {
-              if (subV) allDialogue.push({ name: subK, text: stringifyOpinion(subV) })
+              if (subV) allDialogue.push({ roundTitle: k, name: subK, text: stringifyOpinion(subV) })
             }
           } else if (v) {
-            allDialogue.push({ name: k, text: stringifyOpinion(v) })
+            allDialogue.push({ roundTitle: k, name: k, text: stringifyOpinion(v) })
           }
         }
       } catch (err) {}
@@ -420,8 +500,32 @@ const SessionCard = ({ session, onDelete }) => {
           .expert-text {
             font-size: 12px;
             color: #334155;
-            white-space: pre-wrap;
             line-height: 1.8;
+          }
+
+          .round-badge-header {
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            color: #facc15;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 800;
+            font-size: 13px;
+            margin: 24px 0 10px 0;
+            border-right: 4px solid #d4af37;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+
+          table {
+            border-collapse: collapse !important;
+            width: 100% !important;
+            page-break-inside: auto !important;
+            margin: 12px 0 !important;
+          }
+
+          table th, table td {
+            white-space: normal !important;
+            word-break: normal !important;
           }
 
           .footer {
@@ -436,7 +540,7 @@ const SessionCard = ({ session, onDelete }) => {
           @media print {
             @page {
               size: A4;
-              margin: 12mm;
+              margin: 10mm;
             }
             body {
               padding: 0 !important;
@@ -447,7 +551,15 @@ const SessionCard = ({ session, onDelete }) => {
             .strategies-grid {
               grid-template-columns: 1fr 1fr 1fr !important;
             }
-            .strat-card, .debate-item, .decree-box {
+            .strat-card, .decree-box {
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+            .round-badge-header {
+              page-break-after: avoid !important;
+              break-after: avoid !important;
+            }
+            table tr {
               page-break-inside: avoid !important;
               break-inside: avoid !important;
             }
@@ -494,13 +606,24 @@ const SessionCard = ({ session, onDelete }) => {
           `).join('')}
         </div>
 
-        <div class="section-title">💬 محضر المداولات الكامل والحوار بين الخبراء الـ 8:</div>
-        ${allDialogue.length > 0 ? allDialogue.map(d => `
-          <div class="debate-item">
-            <div class="expert-name">👤 ${d.name}</div>
-            <div class="expert-text">${formatMarkdownToHtml(d.text)}</div>
-          </div>
-        `).join('') : '<div style="font-size: 12px; color: #94a3b8; padding: 10px;">لا توجد نصوص مسجلة في هذه الجلسة.</div>'}
+        <div class="section-title">💬 محضر المداولات الكامل والحوار بين الخبراء عبر جولات المجلس العلمي:</div>
+        ${(() => {
+          let lastRound = ''
+          return allDialogue.length > 0 ? allDialogue.map(d => {
+            let roundHeader = ''
+            if (d.roundTitle && d.roundTitle !== lastRound) {
+              lastRound = d.roundTitle
+              roundHeader = `<div class="round-badge-header">🏛️ ${d.roundTitle}</div>`
+            }
+            return `
+              ${roundHeader}
+              <div class="debate-item">
+                <div class="expert-name">👤 ${d.name}</div>
+                <div class="expert-text">${formatMarkdownToHtml(d.text)}</div>
+              </div>
+            `
+          }).join('') : '<div style="font-size: 12px; color: #94a3b8; padding: 10px;">لا توجد نصوص مسجلة في هذه الجلسة.</div>'
+        })()}
 
         <div class="footer">
           تم إصدار هذا التقرير تلقائياً من محرك التداول الكمي والذكاء الاصطناعي — منصة صقر (SAQR)
@@ -799,23 +922,24 @@ const SessionCard = ({ session, onDelete }) => {
               style={{ left: '15px', zIndex: 0 }}
             ></div>
 
-            {[
-              { key: 'chartist',     name: 'الشارتيست',  round: '1_dissection' },
-              { key: 'reporter',     name: 'المذيع',      round: '1_dissection' },
-              { key: 'pulser',       name: 'النبّاض',     round: '2_hypotheses' },
-              { key: 'radar',        name: 'الرادار',     round: '2_hypotheses' },
-              { key: 'guardian',     name: 'الحارس',      round: '3_adversarial' },
-              { key: 'investigator', name: 'المحقق',      round: '3_adversarial' },
-              { key: 'engineer',     name: 'المهندس',     round: '4_refinement' },
-              { key: 'prince',       name: 'الأمير',      round: '7_standard_decree' },
-            ].map((expert, idx) => {
-              const roundData = rounds[expert.round] || {}
-              const opinion = roundData[expert.key]
-
-              if (!opinion && isCompleted) return null
-
+            {COUNCIL_ROUNDS.flatMap(r => {
+              const roundContent = rounds[r.id] || (r.altId ? rounds[r.altId] : null) || {}
+              return r.experts.map(exp => {
+                let opinion = roundContent[exp.key]
+                if (!opinion && exp.key === 'advanced') {
+                  opinion = rounds['8_advanced_decree']?.advanced || rounds['8_advanced_learning']?.advanced
+                }
+                return {
+                  roundTitle: r.name,
+                  key: `${r.id}_${exp.key}`,
+                  expertKey: exp.key,
+                  name: `${exp.name} — [${r.name.split(':')[0]}]`,
+                  opinion
+                }
+              })
+            }).filter(item => item.opinion || !isCompleted).map((item, idx) => {
               return (
-                <div key={expert.key} className="d-flex gap-4 position-relative" style={{ zIndex: 1 }}>
+                <div key={item.key} className="d-flex gap-4 position-relative" style={{ zIndex: 1 }}>
                   <div
                     className="bg-black rounded-circle border border-gold border-opacity-20 d-flex align-items-center justify-content-center"
                     style={{ width: '32px', height: '32px', flexShrink: 0 }}
@@ -824,9 +948,9 @@ const SessionCard = ({ session, onDelete }) => {
                   </div>
                   <div className="flex-grow-1">
                     <ExpertOpinion
-                      expertKey={expert.key}
-                      expertName={expert.name}
-                      opinion={opinion || '... في انتظار الدور ...'}
+                      expertKey={item.expertKey}
+                      expertName={item.name}
+                      opinion={item.opinion || '... في انتظار الدور ...'}
                     />
                   </div>
                 </div>

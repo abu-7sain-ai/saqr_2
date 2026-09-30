@@ -583,7 +583,7 @@ class StrategyFactory:
                             {"role": "system", "content": sys_msg},
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=2048,
+                        max_tokens=4096,
                         temperature=0.3,
                     ),
                     timeout=85.0
@@ -628,7 +628,7 @@ class StrategyFactory:
                     self.client.chat.completions.create,
                     model="google/gemini-2.5-flash",
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=2048,
+                    max_tokens=4096,
                     temperature=0.3,
                 ),
                 timeout=85.0

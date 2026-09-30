@@ -67,3 +67,5 @@ scratch/
 *_dump.json
 test_breadth_results.json
 update_vps.py
+*.pdf
+
