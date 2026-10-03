@@ -608,15 +608,19 @@ class StrategyFactory:
                 err_str = str(e)
                 logger.warning(f"[_call_ai] Expert '{expert_key}' ({current_model}) attempt {attempt+1}/{max_retries} failed: {err_str[:200]}")
 
+                # ✅ FIX: On auth/rate-limit errors, switch IMMEDIATELY to fallback — don't waste retries
+                if "401" in err_str or "403" in err_str or "rate_limit" in err_str.lower() or "429" in err_str:
+                    current_model = "google/gemini-2.5-flash"
+                    logger.info(f"[_call_ai] Auth/Rate-limit error — switching expert '{expert_key}' to fallback: {current_model}")
+                    if "429" in err_str:
+                        await asyncio.sleep(3)
+                    else:
+                        await asyncio.sleep(1)
                 # إذا كان الموديل غير صالح أو واجه خطأ 400/404، التبديل لموديل مضمون
-                if "not a valid model" in err_str.lower() or "does not exist" in err_str.lower() or "404" in err_str or "400" in err_str or attempt >= 1:
+                elif "not a valid model" in err_str.lower() or "does not exist" in err_str.lower() or "404" in err_str or "400" in err_str or attempt >= 1:
                     current_model = "google/gemini-2.5-flash"
                     logger.info(f"[_call_ai] Switching expert '{expert_key}' to fallback: {current_model}")
-
-                if "rate_limit" in err_str.lower() or "429" in err_str:
-                    wait_time = (attempt + 1) * 10
-                    logger.warning(f"[_call_ai] Rate limit hit. Waiting {wait_time}s...")
-                    await asyncio.sleep(wait_time)
+                    await asyncio.sleep(2 * (attempt + 1))
                 else:
                     await asyncio.sleep(2 * (attempt + 1))
 

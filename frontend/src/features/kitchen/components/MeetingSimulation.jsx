@@ -221,13 +221,27 @@ const MeetingSimulation = ({ session, onDelete }) => {
 
         <div className="row g-3">
           {experts.map((expert) => {
-            const isThinking =
-              isProcessing &&
-              !opinions.rounds?.[`${experts.indexOf(expert) < 4 ? '1_dissection' : '7_final_decree'}`]
-            const hasOpinion =
-              opinions.rounds &&
-              ((experts.indexOf(expert) < 4 && opinions.rounds['1_dissection']) ||
-                (experts.indexOf(expert) >= 4 && opinions.rounds['7_standard_decree']))
+            // ✅ FIX: Map each expert to their actual round key
+            const EXPERT_ROUND_MAP = {
+              chartist: '1_dissection',
+              reporter: '1_dissection',
+              pulser: '2_hypotheses',
+              radar: '2_hypotheses',
+              guardian: '3_adversarial',
+              investigator: '3_adversarial',
+              engineer: '4_refinement',
+              prince: '7_standard_decree',
+              advanced: '8_advanced_decree',
+            }
+            const expertRoundKey = EXPERT_ROUND_MAP[expert.id] || '7_standard_decree'
+            const expertRoundData = opinions.rounds?.[expertRoundKey]
+            // For advanced, also check the learning round
+            const hasAdvancedData = expert.id === 'advanced' && (
+              opinions.rounds?.['8_advanced_decree']?.[expert.id] ||
+              opinions.rounds?.['8_advanced_learning']?.[expert.id]
+            )
+            const hasOpinion = !!(expertRoundData?.[expert.id] || hasAdvancedData)
+            const isThinking = isProcessing && !hasOpinion && !opinions.rounds?.[expertRoundKey]
 
             return (
               <div key={expert.id} className="col-6 col-md-3">

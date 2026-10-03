@@ -1167,7 +1167,7 @@ async def startup_event():
     scheduler = AsyncIOScheduler()
     scheduler.add_job(scheduled_health_check, 'interval', minutes=5)
     scheduler.add_job(scheduled_market_check, 'interval', minutes=15)
-    scheduler.add_job(scheduled_worker_run, 'interval', minutes=2)
+    scheduler.add_job(scheduled_worker_run, 'interval', minutes=5)
     scheduler.add_job(scheduled_kitchen_check, 'interval', seconds=30)
     scheduler.add_job(scheduled_historical_update, 'interval', hours=6)
     scheduler.start()
