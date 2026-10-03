@@ -746,15 +746,29 @@ class StrategyFactory:
         
         for idx, b in enumerate(top_coins):
             sym = b.get('symbol', '?')
-            price = b.get('price', 0)
-            chg = b.get('change_24h', 0)
-            vol = b.get('volume', 0)
+            # ✅ FIX: Ensure no None reaches format specifiers (causes "unsupported format string passed to NoneType.__format__")
+            price = b.get('price') or 0
+            chg = b.get('change_24h') or 0
+            vol = b.get('volume') or 0
             rsi = b.get('rsi')
             trend = b.get('ema_trend', '')
-            atr = b.get('atr', 0)
-            sharpe = b.get('sharpe', 0)
-            dd = b.get('max_drawdown', 0)
-            wr = b.get('win_rate', 55)
+            atr = b.get('atr') or 0
+            sharpe = b.get('sharpe') or 0
+            dd = b.get('max_drawdown') or 0
+            wr = b.get('win_rate') or 55
+            
+            # ✅ FIX: Cast to float/int to prevent format crashes
+            try:
+                price = float(price)
+                chg = float(chg)
+                vol = float(vol)
+                atr = float(atr)
+                sharpe = float(sharpe)
+                dd = float(dd)
+                wr = float(wr)
+            except (TypeError, ValueError):
+                price = chg = vol = atr = sharpe = dd = 0.0
+                wr = 55.0
             
             rsi_txt = f"{rsi}" if rsi is not None else "50.0"
             trend_txt = f"{trend}" if trend else "صاعد"
